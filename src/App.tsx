@@ -1171,6 +1171,7 @@ console.assert(!!footerEl, 'footer exists');
   );
 }
 
+
   return (
     <div className={`relative min-h-screen text-white overflow-x-hidden bg-[#06070B]`}>
       <AuroraBackground ref={auroraRef} />
