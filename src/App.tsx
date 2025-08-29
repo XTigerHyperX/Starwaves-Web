@@ -1,13 +1,32 @@
 import React from "react";
-import { ArrowRight, Facebook, Instagram, Linkedin, Mail, Phone, MapPin, Play, Send } from "lucide-react";
+import {
+  ArrowRight,
+  Facebook,
+  Instagram,
+  Linkedin,
+  Mail,
+  Phone,
+  MapPin,
+  Play,
+  Send,
+  Check,
+  XCircle,
+  Loader2,
+  Building2,
+  MonitorSpeaker,
+  Printer,
+  Bus,
+  Video,
+  Palette,
+  Sparkles,
+  Star,
+  BadgeCheck,
+} from "lucide-react";
 import "./index.css";
 
-// If you actually have a stylesheet, you can re-enable the line below.
-// import "./index.css";
-
-/**************************
- *  Aurora Canvas Background (JS version + strong burst API)
- **************************/
+/* =========================================================
+   Aurora Canvas Background (with burst API)
+   =======================================================*/
 const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const scrollRef = React.useRef(0);
@@ -16,13 +35,13 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
 
   React.useImperativeHandle(ref, () => ({
     burst: () => {
-      // start at full intensity then decay to 0
-      burstRef.current = 1;
+      // Massive magical burst: higher intensity, longer duration
+      burstRef.current = 2.5;
       const start = performance.now();
-      const dur = 1000;
+      const dur = 1600;
       const step = (t: number) => {
         const p = Math.min(1, (t - start) / dur);
-        burstRef.current = 1 - p; // linear decay (snappy)
+        burstRef.current = 2.5 * (1 - p); // much stronger burst
         if (p < 1) requestAnimationFrame(step);
       };
       requestAnimationFrame(step);
@@ -68,19 +87,21 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
       gradCache.vignette = null;
     };
 
-    let resizeTicking = false;
+    // Debounce resize and scroll for performance
+    let resizeTimeout: number | null = null;
     const onResize = () => {
-      if (!resizeTicking) {
-        resizeTicking = true;
-        requestAnimationFrame(() => {
-          resizeTicking = false;
-          resize();
-        });
-      }
+      if (resizeTimeout) window.clearTimeout(resizeTimeout);
+      resizeTimeout = window.setTimeout(resize, 120);
     };
     window.addEventListener("resize", onResize, { passive: true });
 
-    const onScroll = () => (scrollRef.current = window.scrollY || 0);
+    let scrollTimeout: number | null = null;
+    const onScroll = () => {
+      if (scrollTimeout) window.clearTimeout(scrollTimeout);
+      scrollTimeout = window.setTimeout(() => {
+        scrollRef.current = window.scrollY || 0;
+      }, 60);
+    };
     window.addEventListener("scroll", onScroll, { passive: true });
 
     const gradientMain = () => {
@@ -168,7 +189,7 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
 
     function drawAurora(t: number) {
       const parY = Math.min(90, scrollRef.current * 0.09);
-      const boost = 1 + burstRef.current * 1.2; // stronger during burst
+  const boost = 1 + burstRef.current * 2.5; // much stronger during burst
 
       ctx.save();
       ctx.translate(w * 0.5, h * 0.5 + parY);
@@ -285,33 +306,68 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
   return <canvas ref={canvasRef} className="fixed inset-0 z-0 pointer-events-none" />;
 });
 
-/**************************
- *  Small Layout Helpers (more mobile-friendly)
- **************************/
-function Container({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <div className={`max-w-7xl mx-auto px-4 sm:px-6 ${className}`}>{children}</div>;
+/* =========================================================
+   Layout helpers
+   =======================================================*/
+function Container({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`max-w-7xl mx-auto px-4 sm:px-6 ${className}`}>
+      {children}
+    </div>
+  );
 }
 
-function Section({ id, className = "", children }: { id?: string; className?: string; children: React.ReactNode }) {
+function Section({
+  id,
+  className = "",
+  children,
+}: {
+  id?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <section id={id} className={`relative py-16 sm:py-20 md:py-28 ${className}`}>
+  <section id={id} className={`relative py-12 sm:py-16 md:py-20 ${className}`}>
       <Orbs />
       <Container>{children}</Container>
     </section>
   );
 }
 
-/**************************
- *  Micro-interactions
- **************************/
+/* =========================================================
+   Micro-interactions
+   =======================================================*/
 function useSmoothScroll() {
-  const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  // Memoize ease function
+  const ease = React.useCallback(
+    (t: number) =>
+      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+    []
+  );
+
+  const reduced =
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   return (id: string) => {
     const el = document.getElementById(id);
     if (!el) return;
     const header = 56;
-    const start = window.scrollY;
     const target = el.getBoundingClientRect().top + window.scrollY - header;
+
+    if (reduced) {
+      window.scrollTo(0, target);
+      return;
+    }
+
+    const start = window.scrollY;
     const duration = 800;
     let startTime: number | null = null;
 
@@ -329,11 +385,13 @@ function useSmoothScroll() {
 function useActiveSection(ids: string[]) {
   const [active, setActive] = React.useState(ids[0]);
   React.useEffect(() => {
+    // Only observe if IntersectionObserver is supported
+    if (!('IntersectionObserver' in window)) return;
     const obs = new IntersectionObserver(
       (entries) => {
-        entries.forEach((e) => {
+        for (const e of entries) {
           if (e.isIntersecting) setActive((e.target as HTMLElement).id);
-        });
+        }
       },
       { rootMargin: "-40% 0px -55% 0px", threshold: 0.01 }
     );
@@ -371,18 +429,18 @@ function useMagnetic() {
 function useTilt() {
   const ref = React.useRef<HTMLDivElement | null>(null);
   React.useEffect(() => {
-    // Skip on touch / coarse pointers (mobile)
-    if (window.matchMedia && !window.matchMedia("(pointer: fine)").matches) return;
-
+    if (window.matchMedia && !window.matchMedia("(pointer: fine)").matches)
+      return;
     const el = ref.current;
     if (!el) return;
     const onMove = (e: MouseEvent) => {
       const r = el.getBoundingClientRect();
       const px = (e.clientX - r.left) / r.width - 0.5;
       const py = (e.clientY - r.top) / r.height - 0.5;
-      el.style.transform = `perspective(800px) rotateX(${(-py * 6).toFixed(2)}deg) rotateY(${(px * 8).toFixed(2)}deg)`;
+      el.style.transform = `perspective(800px) rotateX(${(-py * 6).toFixed(
+        2
+      )}deg) rotateY(${(px * 8).toFixed(2)}deg)`;
       el.style.boxShadow = `0 20px 40px rgba(186,137,255,0.10)`;
-      // glare cursor position
       const ox = e.clientX - r.left;
       const oy = e.clientY - r.top;
       el.style.setProperty("--mx", `${ox}px`);
@@ -402,27 +460,223 @@ function useTilt() {
   return ref;
 }
 
-/**************************
- *  Decorative Orbs
- **************************/
+
+/* =========================================================
+   Decorative Orbs
+   =======================================================*/
 function Orbs() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
       <div
         className="absolute w-48 sm:w-64 h-48 sm:h-64 rounded-full blur-3xl opacity-20"
-        style={{ left: "-4rem", top: "-2rem", background: "radial-gradient(circle,#6CA4FF55,transparent 60%)" }}
+        style={{
+          left: "-4rem",
+          top: "-2rem",
+          background: "radial-gradient(circle,#6CA4FF55,transparent 60%)",
+        }}
       />
       <div
         className="absolute w-48 sm:w-64 h-48 sm:h-64 rounded-full blur-3xl opacity-20"
-        style={{ right: "-3rem", bottom: "-2rem", background: "radial-gradient(circle,#BA89FF55,transparent 60%)" }}
+        style={{
+          right: "-3rem",
+          bottom: "-2rem",
+          background: "radial-gradient(circle,#BA89FF55,transparent 60%)",
+        }}
       />
     </div>
   );
 }
 
-/**************************
- *  Gradient Ring (hover)
- **************************/
+/* =========================================================
+   Back to top button
+   =======================================================*/
+function BackToTop() {
+  const [show, setShow] = React.useState(false);
+  const scrollTo = useSmoothScroll();
+  React.useEffect(() => {
+    const onScroll = () => setShow((window.scrollY || 0) > 600);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  if (!show) return null;
+  return (
+    <button
+      onClick={() => scrollTo("home")}
+      aria-label="Back to top"
+      className="fixed bottom-6 right-6 z-30 rounded-full bg-white text-black shadow-lg hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 w-12 h-12 grid place-items-center"
+    >
+      ↑
+    </button>
+  );
+}
+
+/* =========================================================
+   Floating CTA Dock
+   =======================================================*/
+function CTADock({ onQuote }: { onQuote: () => void }) {
+  return (
+  <div className="fixed bottom-4 right-4 z-20 hidden sm:flex items-center gap-1.5 p-1.5 rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm">
+      <button
+        onClick={onQuote}
+    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black text-sm font-medium hover:opacity-90"
+      >
+    <Mail className="w-3.5 h-3.5" /> Get a quote
+      </button>
+      <a
+        href="tel:+21612345678"
+    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 text-sm"
+      >
+    <Phone className="w-3.5 h-3.5" /> Call
+      </a>
+      <a
+        href="mailto:hello@starwaves.tn"
+    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 text-sm"
+      >
+    <Send className="w-3.5 h-3.5" /> Email
+      </a>
+    </div>
+  );
+}
+
+/* =========================================================
+   Process Timeline
+   =======================================================*/
+function StepCard({ title, desc, index }: { title: string; desc: string; index: number }) {
+  return (
+    <div className="relative group">
+      <GradientRing />
+      <div className="relative rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
+        <div className="flex items-start gap-4">
+          <div className="shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-[#6CA4FF]/80 to-[#BA89FF]/80 text-black font-semibold grid place-items-center">
+            <span className="text-black">{index}</span>
+          </div>
+          <div>
+            <h3 className="text-white font-semibold">{title}</h3>
+            <p className="mt-1 text-white/80 text-sm">{desc}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProcessSection() {
+  const steps = [
+    { title: "Discovery", desc: "Objectives, stakeholders, constraints, and KPIs." },
+    { title: "Design", desc: "Experience mapping, scenography, media plan, and budgets." },
+    { title: "Pre‑production", desc: "Vendors, CADs, run‑of‑show, logistics & risk playbooks." },
+    { title: "Onsite ops", desc: "Hotel desk, stage & AV, transport, and branding install." },
+    { title: "Wrap & report", desc: "Strike, reconciliation, and post‑event media delivery." },
+  ];
+  return (
+    <Section id="process">
+      <Reveal>
+        <div className="flex items-center justify-between gap-6">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold">How we work</h2>
+          <div className="text-white/70 text-sm">Structured, accountable, repeatable.</div>
+        </div>
+      </Reveal>
+      <div className="mt-8 grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {steps.map((s, i) => (
+          <Reveal key={s.title} delay={i * 60}>
+            <StepCard title={s.title} desc={s.desc} index={i + 1} />
+          </Reveal>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+/* =========================================================
+   Testimonials
+   =======================================================*/
+function TestimonialCard({ quote, author, role }: { quote: string; author: string; role: string }) {
+  return (
+    <div className="relative group">
+      <GradientRing />
+      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
+        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(500px circle at 20% 0%, rgba(255,255,255,0.06), transparent 60%)" }} />
+        <div className="relative">
+          <div className="text-white/90 italic">“{quote}”</div>
+          <div className="mt-4 text-sm text-white/70">{author} — {role}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Testimonials() {
+  const items = [
+    { quote: "Flawless operations and a creative team we could trust.", author: "Chapter Chair", role: "Medical Society" },
+    { quote: "From venues to media, everything was coordinated and clear.", author: "Program Director", role: "Gov Forum" },
+    { quote: "Attendees loved the production value and pace.", author: "Event Manager", role: "Expo" },
+  ];
+  return (
+    <Section id="testimonials">
+      <Reveal>
+        <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold mb-2">What clients say</h2>
+        <div className="text-white/70">Signals from recent congresses & expos.</div>
+      </Reveal>
+      <div className="mt-8 grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {items.map((t, i) => (
+          <Reveal key={i} delay={i * 60}>
+            <TestimonialCard {...t} />
+          </Reveal>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+/* =========================================================
+   FAQ (Accordion)
+   =======================================================*/
+function FAQItem({ q, a }: { q: string; a: string }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/5">
+      <button
+        className="w-full flex items-center justify-between gap-4 px-4 py-3 text-left hover:bg-white/5 rounded-xl"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className="font-medium">{q}</span>
+        <span className={`transition-transform ${open ? "rotate-90" : ""}`}>›</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 text-white/80 text-sm">{a}</div>
+      )}
+    </div>
+  );
+}
+
+function FAQ() {
+  const faqs = [
+    { q: "How fast can you quote?", a: "Typically within 48 hours with at least one venue option and draft budget." },
+    { q: "Do you work outside Tunisia?", a: "Yes, via partner networks; brokerage and media remain in-house." },
+    { q: "Minimum event size?", a: "We tailor to scope; from 150 pax breakouts to 2,000+ plenaries." },
+    { q: "Do you support hybrid/streaming?", a: "Yes — multi-cam, hybrid stages, and multilingual streaming." },
+    { q: "Can you handle branding & expo booths?", a: "Full print ecosystem, wayfinding, lanyards, booths, and overnight installs." },
+  ];
+  return (
+    <Section id="faq">
+      <Reveal>
+        <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold mb-2">Frequently asked</h2>
+        <div className="text-white/70">Quick answers to common questions.</div>
+      </Reveal>
+      <div className="mt-6 grid md:grid-cols-2 gap-4">
+        {faqs.map((f) => (
+          <FAQItem key={f.q} q={f.q} a={f.a} />
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+/* =========================================================
+   Gradient Ring (hover)
+   =======================================================*/
 function GradientRing() {
   return (
     <span
@@ -432,7 +686,8 @@ function GradientRing() {
       style={{
         background: "linear-gradient(90deg, #6CA4FF, #BA89FF, #FFA85E)",
         padding: "1px",
-        WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
+        WebkitMask:
+          "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
         WebkitMaskComposite: "xor",
         maskComposite: "exclude",
         borderRadius: "1rem",
@@ -441,12 +696,19 @@ function GradientRing() {
   );
 }
 
-/**************************
- *  Components
- **************************/
+/* =========================================================
+   Nav
+   =======================================================*/
 function Nav() {
   const scrollTo = useSmoothScroll();
-  const active = useActiveSection(["home", "services", "partners", "work", "about", "contact"]);
+  const active = useActiveSection([
+    "home",
+    "services",
+    "partners",
+    "work",
+    "about",
+    "contact",
+  ]);
   const [open, setOpen] = React.useState(false);
 
   const link = (id: string) => (e?: React.MouseEvent) => {
@@ -457,43 +719,69 @@ function Nav() {
 
   const linkClass = (id: string) =>
     `hover:text-white relative ${
-      active === id ? "text-white after:content-[''] after:absolute after:-bottom-1 after:left-0 after:h-[2px] after:w-full after:bg-white/70" : ""
+      active === id
+        ? "text-white after:content-[''] after:absolute after:-bottom-1 after:left-0 after:h-[2px] after:w-full after:bg-white/70"
+        : "text-white/80"
     }`;
 
   return (
     <>
-      <header className="fixed top-0 inset-x-0 z-20 backdrop-blur-sm border-b border-white/10">
+      <header className="fixed top-0 inset-x-0 z-20 border-b border-white/10 backdrop-blur-md bg-transparent">
         <Container className="flex items-center justify-between h-14">
-          <a href="#home" onClick={link("home")} className="flex items-center gap-2">
-            <img src="/logo.png" alt="Starwaves" className="block w-36 sm:w-40 md:w-44 h-auto" loading="eager" decoding="async" />
+          <a
+            href="#home"
+            onClick={link("home")}
+            className="flex items-center gap-2"
+          >
+            <img
+              src="/logo.png"
+              alt="Starwaves"
+              className="block w-36 sm:w-40 md:w-44 h-auto"
+              loading="eager"
+              decoding="async"
+            />
           </a>
 
-          {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-8 text-sm text-white/80">
+          <nav className="hidden md:flex items-center gap-8 text-sm">
             <a href="#home" onClick={link("home")} className={linkClass("home")}>
               Home
             </a>
-            <a href="#services" onClick={link("services")} className={linkClass("services")}>
+            <a
+              href="#services"
+              onClick={link("services")}
+              className={linkClass("services")}
+            >
               Services
             </a>
-            <a href="#partners" onClick={link("partners")} className={linkClass("partners")}>
+            <a
+              href="#partners"
+              onClick={link("partners")}
+              className={linkClass("partners")}
+            >
               Partners
             </a>
             <a href="#work" onClick={link("work")} className={linkClass("work")}>
               Work
             </a>
-            <a href="#about" onClick={link("about")} className={linkClass("about")}>
+            <a
+              href="#about"
+              onClick={link("about")}
+              className={linkClass("about")}
+            >
               About
             </a>
-            <a href="#contact" onClick={link("contact")} className={linkClass("contact")}>
+            <a
+              href="#contact"
+              onClick={link("contact")}
+              className={linkClass("contact")}
+            >
               Contact
             </a>
           </nav>
 
-          {/* Mobile menu button */}
           <button
             aria-label="Open menu"
-            className="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white/5 border border-white/10"
+            className="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white/5 border border-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
             onClick={() => setOpen(true)}
           >
             <span className="sr-only">Menu</span>
@@ -504,7 +792,6 @@ function Nav() {
         </Container>
       </header>
 
-      {/* Mobile overlay menu */}
       {open && (
         <div className="md:hidden fixed inset-0 z-30 bg-black/70 backdrop-blur-md">
           <Container className="pt-20">
@@ -513,7 +800,7 @@ function Nav() {
               <button
                 aria-label="Close menu"
                 onClick={() => setOpen(false)}
-                className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white/5 border border-white/10"
+                className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white/5 border border-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
               >
                 ✕
               </button>
@@ -522,19 +809,35 @@ function Nav() {
               <a href="#home" onClick={link("home")} className="hover:text-white">
                 Home
               </a>
-              <a href="#services" onClick={link("services")} className="hover:text-white">
+              <a
+                href="#services"
+                onClick={link("services")}
+                className="hover:text-white"
+              >
                 Services
               </a>
-              <a href="#partners" onClick={link("partners")} className="hover:text-white">
+              <a
+                href="#partners"
+                onClick={link("partners")}
+                className="hover:text-white"
+              >
                 Partners
               </a>
               <a href="#work" onClick={link("work")} className="hover:text-white">
                 Work
               </a>
-              <a href="#about" onClick={link("about")} className="hover:text-white">
+              <a
+                href="#about"
+                onClick={link("about")}
+                className="hover:text-white"
+              >
                 About
               </a>
-              <a href="#contact" onClick={link("contact")} className="hover:text-white">
+              <a
+                href="#contact"
+                onClick={link("contact")}
+                className="hover:text-white"
+              >
                 Contact
               </a>
             </nav>
@@ -545,19 +848,57 @@ function Nav() {
   );
 }
 
-function ServiceCard({ title, desc }: { title: string; desc: string }) {
+/* =========================================================
+   Cards
+   =======================================================*/
+function ServiceCard({
+  title,
+  desc,
+  points,
+  Icon,
+}: {
+  title: string;
+  desc: string;
+  points?: string[];
+  Icon: React.ComponentType<{ className?: string }>;
+}) {
   return (
     <div className="relative group" data-test="service-card">
       <GradientRing />
-      <div className="relative rounded-2xl border border-white/10 bg-white/5 p-6 sm:p-7 md:p-8 backdrop-blur-sm transition shadow-[inset_0_0_0_0_rgba(0,0,0,0)] hover:shadow-[0_0_40px_0_rgba(186,137,255,0.12)]">
-        <h3 className="text-white font-semibold text-lg">{title}</h3>
-        <p className="mt-2 text-sm md:text-base text-white/80">{desc}</p>
+      <div className="relative rounded-2xl border border-white/10 bg-white/5 p-6 sm:p-7 md:p-8 backdrop-blur-sm transition hover:shadow-[0_0_40px_0_rgba(186,137,255,0.12)]">
+        <div className="flex items-start gap-4">
+          <div className="shrink-0 rounded-xl border border-white/10 bg-white/10 p-2">
+            <Icon className="w-6 h-6 text-white/90" />
+          </div>
+          <div>
+            <h3 className="text-white font-semibold text-lg">{title}</h3>
+            <p className="mt-2 text-sm md:text-base text-white/80">{desc}</p>
+          </div>
+        </div>
+        {points?.length ? (
+          <ul className="mt-4 space-y-1.5 text-sm text-white/70">
+            {points.map((p) => (
+              <li key={p} className="flex items-start gap-2">
+                <Sparkles className="w-4 h-4 mt-0.5 text-white/60" />
+                <span>{p}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function WorkCard({ title, role }: { title: string; role: string }) {
+function WorkCard({
+  title,
+  role,
+  tags = [],
+}: {
+  title: string;
+  role: string;
+  tags?: string[];
+}) {
   const tiltRef = useTilt();
   return (
     <div className="relative group" data-test="work-card">
@@ -566,7 +907,6 @@ function WorkCard({ title, role }: { title: string; role: string }) {
         ref={tiltRef}
         className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 to-white/0 p-6 sm:p-7 md:p-8 backdrop-blur-[2px] hover:from-white/10 transition will-change-transform"
       >
-        {/* glare */}
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 rounded-2xl"
@@ -576,17 +916,44 @@ function WorkCard({ title, role }: { title: string; role: string }) {
             mixBlendMode: "overlay",
           }}
         />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(108,164,255,0.15),transparent_40%),radial-gradient(circle_at_80%_80%,rgba(186,137,255,0.12),transparent_35%)]" />
-        <div className="relative">
+<div
+  aria-hidden
+  className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(255,255,255,0.06),transparent_60%)]"
+/>        <div className="relative">
           <div className="text-sm text-white/70">{role}</div>
           <div className="text-xl sm:text-2xl font-semibold">{title}</div>
+          {tags.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {tags.map((t) => (
+                <span
+                  key={t}
+                  className="text-xs rounded-full border border-white/10 bg-white/5 px-2 py-1 text-white/70"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
   );
 }
 
-function Reveal({ children, delay = 0, className = "" }: { children: React.ReactNode; delay?: number; className?: string }) {
+ 
+
+/* =========================================================
+   Reveal
+   =======================================================*/
+function Reveal({
+  children,
+  delay = 0,
+  className = "",
+}: {
+  children: React.ReactNode;
+  delay?: number;
+  className?: string;
+}) {
   const ref = React.useRef<HTMLDivElement | null>(null);
   const [inView, setInView] = React.useState(false);
   React.useEffect(() => {
@@ -617,67 +984,9 @@ function Reveal({ children, delay = 0, className = "" }: { children: React.React
   );
 }
 
-function TypeCycle({
-  phrases,
-  typingSpeed = 70,
-  deletingSpeed = 45,
-  pause = 1400,
-  jitter = 12,
-}: {
-  phrases: string[];
-  typingSpeed?: number;
-  deletingSpeed?: number;
-  pause?: number;
-  jitter?: number;
-}) {
-  const [text, setText] = React.useState("");
-  const [i, setI] = React.useState(0);
-  const [del, setDel] = React.useState(false);
-  const longest = React.useMemo(() => phrases.reduce((m, p) => Math.max(m, p.length), 0), [phrases]);
-
-  React.useEffect(() => {
-    const current = phrases[i % phrases.length];
-    const done = text === current;
-    const empty = text.length === 0;
-    let t: number | undefined;
-
-    const d = (base: number) => base + Math.floor(Math.random() * jitter);
-
-    if (!del) {
-      if (!done) t = window.setTimeout(() => setText(current.slice(0, text.length + 1)), d(typingSpeed));
-      else t = window.setTimeout(() => setDel(true), pause);
-    } else {
-      if (!empty) t = window.setTimeout(() => setText(text.slice(0, -1)), d(deletingSpeed));
-      else {
-        setDel(false);
-        setI((v) => (v + 1) % phrases.length);
-      }
-    }
-    return () => {
-      if (t) clearTimeout(t);
-    };
-  }, [text, del, i, phrases, typingSpeed, deletingSpeed, pause, jitter]);
-
-  return (
-    <span className="inline-flex items-center align-middle" style={{ minWidth: `${Math.ceil(longest * 0.62)}ch` }}>
-      <span>{text}</span>
-      <span className="ml-1 w-[2px] h-[1em] bg-white/80 animate-pulse" />
-    </span>
-  );
-}
-
-function AnimatedHeadline() {
-  const phrases = React.useMemo(() => ["we create worlds", "we shape experiences", "we stage congresses", "we craft stories"], []);
-  return (
-    <span className="bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] bg-clip-text text-transparent inline-block">
-      <TypeCycle phrases={phrases} />
-    </span>
-  );
-}
-
-/**************************
- *  Extra Visuals (progress bar + counters + marquee)
- **************************/
+/* =========================================================
+   Extras
+   =======================================================*/
 function ScrollProgressBar({ show = true }: { show?: boolean }) {
   const ref = React.useRef<HTMLDivElement | null>(null);
   React.useEffect(() => {
@@ -685,7 +994,10 @@ function ScrollProgressBar({ show = true }: { show?: boolean }) {
     const el = ref.current!;
     const onScroll = () => {
       const max = document.body.scrollHeight - window.innerHeight;
-      const p = Math.max(0, Math.min(1, (window.scrollY || 0) / Math.max(1, max)));
+      const p = Math.max(
+        0,
+        Math.min(1, (window.scrollY || 0) / Math.max(1, max))
+      );
       if (el) el.style.transform = `scaleX(${p})`;
     };
     onScroll();
@@ -695,7 +1007,10 @@ function ScrollProgressBar({ show = true }: { show?: boolean }) {
   if (!show) return null;
   return (
     <div className="fixed top-0 left-0 right-0 z-[30] h-[3px] bg-transparent">
-      <div ref={ref} className="origin-left h-full bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] scale-x-0 transition-transform duration-75" />
+      <div
+        ref={ref}
+        className="origin-left h-full bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] scale-x-0 transition-transform duration-75"
+      />
     </div>
   );
 }
@@ -713,7 +1028,9 @@ function CountUp({ to, label }: { to: number; label: string }) {
           from = 0;
         const tick = (t: number) => {
           const p = Math.min(1, (t - start) / dur);
-          setVal(Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3))));
+          setVal(
+            Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3)))
+          );
           if (p < 1) requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
@@ -724,101 +1041,61 @@ function CountUp({ to, label }: { to: number; label: string }) {
     return () => obs.disconnect();
   }, [to]);
   return (
-    <div ref={ref} className="rounded-2xl border border-white/10 px-4 sm:px-5 py-4 bg-white/5 backdrop-blur-sm text-center">
-      <div className="text-2xl sm:text-3xl font-semibold">{val.toLocaleString()}</div>
+    <div
+      ref={ref}
+      className="rounded-2xl border border-white/10 px-4 sm:px-5 py-4 bg-white/5 backdrop-blur-sm text-center"
+    >
+      <div className="text-2xl sm:text-3xl font-semibold">
+        {val.toLocaleString()}
+      </div>
       <div className="text-white/70 text-xs sm:text-sm">{label}</div>
     </div>
   );
 }
 
-function Marquee({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="overflow-hidden relative">
-      <div className="flex gap-10 animate-[marquee_28s_linear_infinite] hover:[animation-play-state:paused]">
-        {children}
-        {children}
-      </div>
-      <style>{`@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }`}</style>
-    </div>
-  );
-}
-
-// SwapWords (TS-safe CSS var)
-function SwapWords({ items }: { items: string[] }) {
-  type CSSVars = React.CSSProperties & { ["--ty"]?: string };
-
-  const [i, setI] = React.useState(0);
-  const longest = React.useMemo(() => items.reduce((m, p) => Math.max(m, p.length), 0), [items]);
-
-  React.useEffect(() => {
-    const t = setInterval(() => setI((v) => (v + 1) % items.length), 2200);
-    return () => clearInterval(t);
-  }, [items.length]);
-
-  const innerStyle: CSSVars = { ["--ty"]: `-${i * 1.25}em` };
-
-  return (
-    <>
-      <span className="ml-2 sm:ml-3 inline-grid h-[1.25em] overflow-hidden align-middle [perspective:800px]" style={{ minWidth: `${Math.ceil(longest * 0.55)}ch` }}>
-        <span key={i} className="swap-inner will-change-transform animate-[swap-pop_600ms_cubic-bezier(.2,.8,.2,1)]" style={innerStyle}>
-          {items.map((w, idx) => (
-            <span key={w + idx} className="block h-[1.25em] bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] bg-clip-text text-transparent font-medium tracking-wide">
-              {w}
-            </span>
-          ))}
-        </span>
-      </span>
-
-      <style>{`
-        .swap-inner { transform: translateY(var(--ty)); }
-        @keyframes swap-pop {
-          0%   { transform: translateY(var(--ty)) rotateX(18deg); opacity: .6; filter: blur(2px); }
-          60%  { transform: translateY(var(--ty)) rotateX(0deg);  opacity: 1;  filter: blur(0);   }
-          100% { transform: translateY(var(--ty)) rotateX(0deg); }
-        }
-      `}</style>
-    </>
-  );
-}
-
-/**************************
- *  Unlock FX (flash + ring + particles + streaks)
- **************************/
+/* =========================================================
+   Unlock FX
+   =======================================================*/
 function UnlockFX({ trigger }: { trigger: number }) {
   const [active, setActive] = React.useState(false);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
   React.useEffect(() => {
     if (!trigger) return;
-    setActive(true);
-    const c = canvasRef.current!;
-    const ctx = c.getContext("2d")!;
-    let w = (c.width = window.innerWidth * 2);
-    let h = (c.height = window.innerHeight * 2);
-    c.style.width = window.innerWidth + "px";
-    c.style.height = window.innerHeight + "px";
+  setActive(true);
+  const c = canvasRef.current;
+  if (!c) return;
+  const ctx = c.getContext("2d");
+  if (!ctx) return;
+  let w = (c.width = window.innerWidth * 2);
+  let h = (c.height = window.innerHeight * 2);
+  c.style.width = window.innerWidth + "px";
+  c.style.height = window.innerHeight + "px";
 
-    const particles = Array.from({ length: 140 }, () => {
+    // Premium magical burst: fewer, high-quality glowing particles and sparkles
+    const particles = Array.from({ length: 60 }, () => {
       const ang = Math.random() * Math.PI * 2;
-      const spd = 6 + Math.random() * 16;
+      const spd = 18 + Math.random() * 22;
       return {
         x: w / 2,
         y: h / 2,
         vx: Math.cos(ang) * spd,
         vy: Math.sin(ang) * spd,
         life: 0,
-        max: 35 + Math.random() * 25,
+        max: 70 + Math.random() * 30,
+        color: `rgba(${186 + Math.random()*40},${137 + Math.random()*40},255,1)`
       };
     });
 
-    const streaks = Array.from({ length: 6 }, () => {
-      const dir = Math.random() * Math.PI * 2;
-      const speed = 24 + Math.random() * 18;
+    // Sparkles
+    const sparkles = Array.from({ length: 18 }, () => {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 30 + Math.random() * 40;
       return {
-        sx: w / 2,
-        sy: h / 2,
-        vx: Math.cos(dir) * speed,
-        vy: Math.sin(dir) * speed,
+        x: w / 2,
+        y: h / 2,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
         life: 0,
         max: 40 + Math.random() * 20,
       };
@@ -828,52 +1105,52 @@ function UnlockFX({ trigger }: { trigger: number }) {
     const tick = () => {
       ctx.clearRect(0, 0, w, h);
       ctx.globalCompositeOperation = "lighter";
-      // particles
-      for (const p of particles) {
-        // @ts-ignore
-        p.x += p.vx;
-        // @ts-ignore
-        p.y += p.vy;
-        // @ts-ignore
-        p.vx *= 0.96;
-        // @ts-ignore
-        p.vy *= 0.96;
-        // @ts-ignore
-        p.life++;
-        // @ts-ignore
-        const a = Math.max(0, 1 - p.life / p.max);
+      // Draw multi-layered aurora burst
+      for (let i = 0; i < 3; i++) {
+        ctx.save();
+        ctx.globalAlpha = 0.18 - i * 0.05;
+        ctx.filter = `blur(${60 - i * 20}px)`;
         ctx.beginPath();
-        // @ts-ignore
-        ctx.arc(p.x, p.y, 3 + (1 - a) * 3, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(186,137,255,${0.8 * a})`;
+        ctx.arc(w/2, h/2, 220 + i*80, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(${108 + i*40},${164 + i*20},255,1)`;
         ctx.fill();
+        ctx.restore();
       }
-      // streaks
-      ctx.lineCap = "round";
-      for (const s of streaks) {
-        // @ts-ignore
+      // Draw glowing particles
+      for (const p of particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vx *= 0.96;
+        p.vy *= 0.96;
+        p.life++;
+        const a = Math.max(0, 1 - p.life / p.max);
+        ctx.save();
+        ctx.globalAlpha = 0.7 * a;
+        ctx.filter = "blur(6px)";
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 8 + (1 - a) * 8, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+        ctx.restore();
+      }
+      // Draw sparkles
+      for (const s of sparkles) {
+        s.x += s.vx;
+        s.y += s.vy;
+        s.vx *= 0.93;
+        s.vy *= 0.93;
         s.life++;
-        // @ts-ignore
         const a = Math.max(0, 1 - s.life / s.max);
-        // @ts-ignore
-        const x = s.sx + s.vx * (s.life * 0.6);
-        // @ts-ignore
-        const y = s.sy + s.vy * (s.life * 0.6);
-        ctx.strokeStyle = `rgba(255,255,255,${0.6 * a})`;
-        ctx.lineWidth = 3;
+        ctx.save();
+        ctx.globalAlpha = 0.8 * a;
+        ctx.filter = "blur(1px)";
         ctx.beginPath();
-        ctx.moveTo(x, y);
-        // @ts-ignore
-        ctx.lineTo(x - s.vx * 4, y - s.vy * 4);
-        ctx.stroke();
-        ctx.strokeStyle = `rgba(186,137,255,${0.45 * a})`;
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        // @ts-ignore
-        ctx.moveTo(x - s.vx * 1.5, y - s.vy * 1.5);
-        // @ts-ignore
-        ctx.lineTo(x - s.vx * 6, y - s.vy * 6);
-        ctx.stroke();
+        ctx.arc(s.x, s.y, 2 + (1 - a) * 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,255,1)`;
+        ctx.shadowColor = '#BA89FF';
+        ctx.shadowBlur = 16;
+        ctx.fill();
+        ctx.restore();
       }
       raf = requestAnimationFrame(tick);
     };
@@ -882,7 +1159,7 @@ function UnlockFX({ trigger }: { trigger: number }) {
     const timeout = setTimeout(() => {
       cancelAnimationFrame(raf);
       setActive(false);
-    }, 1100);
+    }, 1700);
 
     return () => {
       cancelAnimationFrame(raf);
@@ -893,32 +1170,65 @@ function UnlockFX({ trigger }: { trigger: number }) {
   if (!active) return null;
   return (
     <div className="fixed inset-0 z-[35] pointer-events-none">
-      {/* radial flash */}
       <div
         className="absolute inset-0"
         style={{
-          background: "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.35), rgba(255,255,255,0.12) 30%, rgba(255,255,255,0) 60%)",
-          animation: "flashFade 900ms ease-out forwards",
+          background:
+            "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.45), rgba(186,137,255,0.22) 30%, rgba(255,168,94,0.12) 50%, rgba(255,255,255,0) 80%)",
+          animation: "flashFade 1400ms ease-out forwards",
         }}
       />
-      {/* expanding ring */}
       <div
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 border-2 border-white/60 rounded-full"
-        style={{ width: 40, height: 40, animation: "ringExpand 900ms cubic-bezier(.2,.65,.25,1) forwards" }}
-      />
-      {/* particles */}
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+        style={{
+          width: 160,
+          height: 160,
+          background: "conic-gradient(from 0deg, #6CA4FF, #BA89FF, #FFA85E, #6CA4FF)",
+          boxShadow: "0 0 80px 40px #BA89FF88, 0 0 180px 80px #6CA4FF44, 0 0 320px 120px #FFA85E22",
+          border: "6px solid rgba(255,255,255,0.18)",
+          animation: "ringExpand 1400ms cubic-bezier(.2,.65,.25,1) forwards",
+          filter: "blur(0.5px) brightness(1.2)",
+        }}
+      >
+        {/* Sparkles around the ring with staggered, smooth fade */}
+        {[...Array(12)].map((_, i) => (
+          <div
+            key={i}
+            style={{
+              position: "absolute",
+              left: `${80 + Math.cos((i/12)*2*Math.PI)*70}px`,
+              top: `${80 + Math.sin((i/12)*2*Math.PI)*70}px`,
+              width: "12px",
+              height: "12px",
+              borderRadius: "50%",
+              background: "radial-gradient(circle, #fff 60%, #BA89FF 100%)",
+              boxShadow: "0 0 16px 8px #BA89FF88, 0 0 32px 16px #6CA4FF44",
+              opacity: 0.7,
+              pointerEvents: "none",
+              animation: `sparkleFade 1800ms cubic-bezier(.4,.8,.3,1) ${i*120}ms forwards`,
+            }}
+          />
+        ))}
+        <style>{`
+          @keyframes sparkleFade {
+            0% { opacity: 1; transform: scale(1); }
+            60% { opacity: 1; transform: scale(1.12); }
+            100% { opacity: 0; transform: scale(0.7); }
+          }
+        `}</style>
+      </div>
       <canvas ref={canvasRef} className="absolute inset-0" />
       <style>{`
         @keyframes flashFade { from { opacity: 1; } to { opacity: 0; } }
-        @keyframes ringExpand { from { transform: translate(-50%,-50%) scale(0.2); opacity: 1; } to { transform: translate(-50%,-50%) scale(12); opacity: 0; } }
+        @keyframes ringExpand { from { transform: translate(-50%,-50%) scale(0.2); opacity: 1; } to { transform: translate(-50%,-50%) scale(18); opacity: 0; } }
       `}</style>
     </div>
   );
 }
 
-/**************************
- *  Contact Form (no-backend fallback via mailto)
- **************************/
+/* =========================================================
+   Contact Form (same polished UX)
+   =======================================================*/
 function ContactForm() {
   type FormState = {
     name: string;
@@ -933,6 +1243,22 @@ function ContactForm() {
     message: string;
     honey: string;
   };
+  const ids = React.useMemo(() => {
+  // Stable IDs for inputs so React never swaps them out
+  return {
+    name: "cf_name",
+    email: "cf_email",
+    phone: "cf_phone",
+    city: "cf_city",
+    dates: "cf_dates",
+    headcount: "cf_headcount",
+    rooms: "cf_rooms",
+    budget: "cf_budget",
+    av: "cf_av",
+    message: "cf_message",
+  } as const;
+}, []);
+
 
   const [form, setForm] = React.useState<FormState>({
     name: "",
@@ -948,43 +1274,128 @@ function ContactForm() {
     honey: "",
   });
 
-  const [status, setStatus] = React.useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [touched, setTouched] = React.useState<
+    Record<keyof FormState, boolean>
+  >({
+    name: false,
+    email: false,
+    phone: false,
+    city: false,
+    dates: false,
+    headcount: false,
+    rooms: false,
+    budget: false,
+    av: false,
+    message: false,
+    honey: false,
+  });
 
-  // SAFER onChange: copy the value immediately; never read from a possibly-null event later
+  const [status, setStatus] =
+    React.useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [globalMsg, setGlobalMsg] = React.useState<string>("");
+
+  const validEmail = (v: string) => /[^@\s]+@[^@\s]+\.[^@\s]+/.test(v.trim());
+  const required = (v: string) => v.trim().length > 0;
+
+  const formatTN = (v: string) => {
+    const digits = v.replace(/\D/g, "").slice(0, 12);
+    if (digits.startsWith("216")) {
+      const rest = digits.slice(3);
+      return (
+        "+216 " +
+        rest.replace(
+          /(\d{2})(\d{3})(\d{3})?/,
+          (_m, a, b, c) => [a, b, c].filter(Boolean).join(" ")
+        )
+      );
+    }
+    if (digits.startsWith("00216")) {
+      const rest = digits.slice(5);
+      return (
+        "+216 " +
+        rest.replace(
+          /(\d{2})(\d{3})(\d{3})?/,
+          (_m, a, b, c) => [a, b, c].filter(Boolean).join(" ")
+        )
+      );
+    }
+    if (v.startsWith("+")) return "+" + digits;
+    return digits;
+  };
+
   const onField =
     <K extends keyof FormState>(k: K) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      // copy the value synchronously
-      const v =
-        (e.currentTarget && (e.currentTarget as HTMLInputElement | HTMLTextAreaElement).value) ??
-        ((e.target as HTMLInputElement | HTMLTextAreaElement | null)?.value ?? "");
+      const raw =
+        (e.currentTarget &&
+          (e.currentTarget as HTMLInputElement | HTMLTextAreaElement).value) ??
+        ((e.target as HTMLInputElement | HTMLTextAreaElement | null)?.value ??
+          "");
+      const v = k === "phone" ? formatTN(raw) : raw;
       setForm((s) => ({ ...s, [k]: v }));
     };
 
-  const validEmail = (v: string) => /[^@\s]+@[^@\s]+\.[^@\s]+/.test(v);
+  const onBlur = <K extends keyof FormState>(k: K) => () =>
+    setTouched((t) => ({ ...t, [k]: true }));
+
+  const errorFor = (k: keyof FormState): string | null => {
+    if (k === "name" && touched.name && !required(form.name))
+      return "Name is required";
+    if (k === "email" && touched.email && !validEmail(form.email))
+      return "Enter a valid email";
+    if (k === "message" && touched.message && !required(form.message))
+      return "Tell us a few details";
+    return null;
+  };
+
+  const hasError = (k: keyof FormState) => Boolean(errorFor(k));
+  const isOK = (k: keyof FormState) =>
+    touched[k] && !hasError(k) && required((form[k] as string) ?? "");
+
+  const leftChars = 1200 - form.message.length;
+  const messageTooLong = form.message.length > 1200;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (form.honey) return; // bot trap
-    if (!form.name || !validEmail(form.email) || !form.message) {
+    setTouched((t) => ({ ...t, name: true, email: true, message: true }));
+    if (form.honey) return;
+
+    if (
+      !required(form.name) ||
+      !validEmail(form.email) ||
+      !required(form.message) ||
+      messageTooLong
+    ) {
       setStatus("error");
+      setGlobalMsg(
+        messageTooLong
+          ? "Your message is a bit long — please shorten it."
+          : "Please fix the highlighted fields."
+      );
       return;
     }
+
     setStatus("sending");
+    setGlobalMsg("");
 
     try {
       const res = await fetch("/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, _timestamp: new Date().toISOString() }),
+        body: JSON.stringify({
+          ...form,
+          _timestamp: new Date().toISOString(),
+        }),
       });
-      if (res.ok) {
-        setStatus("sent");
-        return;
-      }
-      throw new Error("bad status");
+      if (!res.ok) throw new Error("bad status");
+      setStatus("sent");
+      setGlobalMsg(
+        "Thanks! We’ll reply within 48h with a venue short-list & draft budget."
+      );
     } catch {
-      const subject = encodeURIComponent(`Event inquiry from ${form.name} — ${form.city || ""}`);
+      const subject = encodeURIComponent(
+        `Event inquiry from ${form.name} — ${form.city || ""}`
+      );
       const body = encodeURIComponent(
         `Name: ${form.name}
 Email: ${form.email}
@@ -1003,19 +1414,68 @@ Sent via starwaves.tn`
       );
       window.location.href = `mailto:hello@starwaves.tn?subject=${subject}&body=${body}`;
       setStatus("sent");
+      setGlobalMsg("Thanks! Your email client should open with the details.");
     }
   };
+
+  const Field = ({
+    label,
+    name,
+    requiredField,
+    hint,
+    ok,
+    error,
+    children,
+  }: {
+    label: string;
+    name: string;
+    requiredField?: boolean;
+    hint?: string;
+    ok?: boolean;
+    error?: string | null;
+    children: React.ReactNode;
+  }) => (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label htmlFor={name} className="text-xs text-white/70">
+          {label}{" "}
+          {requiredField ? (
+            <span className="text-white/40">(required)</span>
+          ) : null}
+        </label>
+        <div className="h-5">
+          {ok ? (
+            <Check className="w-4 h-4 text-emerald-400" />
+          ) : error ? (
+            <XCircle className="w-4 h-4 text-rose-300" />
+          ) : null}
+        </div>
+      </div>
+      {children}
+      <div className="min-h-[1rem] text-[11px] leading-4">
+        {error ? (
+          <span className="text-rose-300">{error}</span>
+        ) : hint ? (
+          <span className="text-white/50">{hint}</span>
+        ) : null}
+      </div>
+    </div>
+  );
 
   return (
     <form
       id="contact-form"
       onSubmit={onSubmit}
-      className="relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-5 sm:p-6 md:p-8 text-left backdrop-heavy"
+      className="relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-5 sm:p-6 md:p-8 text-left"
+      noValidate
     >
-      {/* honeypot */}
+      <div className="sr-only" aria-live="polite">
+        {globalMsg}
+      </div>
+
       <input
         type="text"
-        name="company" // make bots more likely to fill this
+        name="company"
         value={form.honey}
         onChange={onField("honey")}
         className="hidden"
@@ -1025,144 +1485,218 @@ Sent via starwaves.tn`
       />
 
       {status === "sent" && (
-        <div className="absolute inset-0 z-10 grid place-items-center rounded-2xl bg-black/70 text-center p-8">
+        <div className="absolute inset-0 z-10 grid place-items-center rounded-2xl bg-black/60 text-center p-8">
           <div>
             <div className="text-2xl font-semibold mb-2">Thank you!</div>
-            <p className="text-white/80">We’ll reply within 48h with a venue short-list & draft budget.</p>
+            <p className="text-white/80">
+              {globalMsg || "We’ll be in touch shortly."}
+            </p>
           </div>
         </div>
       )}
 
-      <div className="grid md:grid-cols-2 gap-4">
-        <div>
-          <label className="text-xs text-white/70">Name</label>
+      <div className="grid md:grid-cols-2 gap-5">
+        <Field
+          label="Name"
+          name="name"
+          requiredField
+          ok={isOK("name")}
+          error={errorFor("name")}
+        >
           <input
-            required
+            id="name"
             name="name"
+            required
             value={form.name}
             onChange={onField("name")}
+            onBlur={onBlur("name")}
             placeholder="Your full name"
-            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
             autoComplete="name"
           />
-        </div>
-        <div>
-          <label className="text-xs text-white/70">Email</label>
+        </Field>
+
+        <Field
+          label="Email"
+          name="email"
+          requiredField
+          ok={isOK("email") && validEmail(form.email)}
+          error={errorFor("email")}
+        >
           <input
-            required
-            type="email"
+            id="email"
             name="email"
+            type="email"
+            required
             value={form.email}
             onChange={onField("email")}
+            onBlur={onBlur("email")}
             placeholder="you@example.com"
-            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
             autoComplete="email"
           />
-        </div>
-        <div>
-          <label className="text-xs text-white/70">Phone</label>
+        </Field>
+
+        <Field label="Phone" name="phone" hint="Optional">
           <input
+            id="phone"
             name="phone"
             value={form.phone}
             onChange={onField("phone")}
-            placeholder="+216 ..."
-            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            onBlur={onBlur("phone")}
+            placeholder="+216 12 345 678"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
             autoComplete="tel"
+            inputMode="tel"
           />
-        </div>
-        <div>
-          <label className="text-xs text-white/70">City</label>
+        </Field>
+
+        <Field label="City" name="city" hint="Where the event happens">
           <input
+            id="city"
             name="city"
             value={form.city}
             onChange={onField("city")}
+            onBlur={onBlur("city")}
             placeholder="Tunis, Hammamet, Sousse..."
-            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
             autoComplete="address-level2"
           />
-        </div>
-        <div>
-          <label className="text-xs text-white/70">Dates</label>
+        </Field>
+
+        <Field label="Dates" name="dates" hint="e.g., 12–14 Oct 2025">
           <input
+            id="dates"
             name="dates"
             value={form.dates}
             onChange={onField("dates")}
+            onBlur={onBlur("dates")}
             placeholder="e.g., 12–14 Oct 2025"
-            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
           />
-        </div>
-        <div>
-          <label className="text-xs text-white/70">Headcount</label>
+        </Field>
+
+        <Field label="Headcount" name="headcount" hint="Approximate total">
           <input
+            id="headcount"
             name="headcount"
             value={form.headcount}
             onChange={onField("headcount")}
+            onBlur={onBlur("headcount")}
             placeholder="e.g., 400"
-            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
             inputMode="numeric"
           />
-        </div>
-        <div>
-          <label className="text-xs text-white/70">Rooms / night</label>
+        </Field>
+
+        <Field label="Rooms / night" name="rooms" hint="Hotel block estimate">
           <input
+            id="rooms"
             name="rooms"
             value={form.rooms}
             onChange={onField("rooms")}
+            onBlur={onBlur("rooms")}
             placeholder="e.g., 120"
-            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
             inputMode="numeric"
           />
-        </div>
-        <div>
-          <label className="text-xs text-white/70">Budget</label>
+        </Field>
+
+        <Field label="Budget" name="budget" hint="Rough range is fine">
           <input
+            id="budget"
             name="budget"
             value={form.budget}
             onChange={onField("budget")}
+            onBlur={onBlur("budget")}
             placeholder="e.g., 80,000 TND"
-            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
             inputMode="numeric"
           />
-        </div>
+        </Field>
+
         <div className="md:col-span-2">
-          <label className="text-xs text-white/70">AV / Stage needs</label>
-          <input
+          <Field
+            label="AV / Stage needs"
             name="av"
-            value={form.av}
-            onChange={onField("av")}
-            placeholder="LED / projection / streaming / translation..."
-            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
-          />
+            hint="LED / projection / streaming / translation…"
+          >
+            <input
+              id="av"
+              name="av"
+              value={form.av}
+              onChange={onField("av")}
+              onBlur={onBlur("av")}
+              placeholder="LED / projection / streaming / translation..."
+              className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            />
+          </Field>
         </div>
+
         <div className="md:col-span-2">
-          <label className="text-xs text-white/70">Message</label>
-          <textarea
-            required
+          <Field
+            label="Message"
             name="message"
-            value={form.message}
-            onChange={onField("message")}
-            rows={6}
-            placeholder="Tell us about your congress..."
-            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
-          />
+            requiredField
+            ok={touched.message && !messageTooLong && required(form.message)}
+            error={
+              messageTooLong
+                ? "Max 1200 characters"
+                : touched.message && !required(form.message)
+                ? "Tell us a few details"
+                : null
+            }
+          >
+            <textarea
+              id="message"
+              name="message"
+              required
+              value={form.message}
+              onChange={onField("message")}
+              onBlur={onBlur("message")}
+              rows={6}
+              placeholder="Tell us about your congress..."
+              className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+              maxLength={1400}
+            />
+            <div className="mt-1 text-[11px] text-white/50 text-right">
+              {Math.max(0, leftChars)} / 1200
+            </div>
+          </Field>
         </div>
       </div>
+
+      {status === "error" && (
+        <div className="mt-4 text-sm text-rose-300" aria-live="polite">
+          {globalMsg || "Please check the fields above."}
+        </div>
+      )}
 
       <div className="mt-5 flex flex-col sm:flex-row items-start sm:items-center gap-3">
         <button
           type="submit"
           disabled={status === "sending"}
-          className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90 disabled:opacity-60"
+          aria-busy={status === "sending"}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
         >
-          <Send className="w-5 h-5" /> {status === "sending" ? "Sending..." : "Send message"}
+          {status === "sending" ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <Send className="w-5 h-5" />
+          )}
+          {status === "sending" ? "Sending…" : "Send message"}
         </button>
-        {status === "error" && <span className="text-sm text-rose-300">Fill name, valid email, and message.</span>}
+        <span className="text-xs text-white/50">
+          We usually reply within 48h.
+        </span>
       </div>
     </form>
   );
 }
 
-
+/* =========================================================
+   Footer
+   =======================================================*/
 function Footer() {
   const scrollTo = useSmoothScroll();
   const go = (id: string) => (e: React.MouseEvent) => {
@@ -1175,100 +1709,164 @@ function Footer() {
       <div className="absolute inset-x-0 -top-px h-px bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E]" />
       <Container className="py-10 sm:py-14">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 sm:gap-10">
-          {/* Brand + blurb */}
           <div>
-            <img src="/logo.png" alt="Starwaves" className="w-36 sm:w-40 md:w-44 h-auto" />
+            <img
+              src="/logo.png"
+              alt="Starwaves"
+              className="w-36 sm:w-40 md:w-44 h-auto"
+            />
             <p className="mt-4 text-white/70 text-sm">
-              Discover cinematic congress operations across Tunisia. We orchestrate hotels, transport, AV, print, and media into one smooth system.
+              Discover cinematic congress operations across Tunisia. We
+              orchestrate hotels, transport, AV, print, and media into one
+              smooth system.
             </p>
             <div className="mt-4 flex gap-3">
-              <a href="https://www.facebook.com/Starwaves" target="_blank" rel="noreferrer" aria-label="Facebook" className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10">
+              <a
+                href="https://www.facebook.com/Starwaves"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Facebook"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10"
+              >
                 <Facebook className="w-5 h-5" />
               </a>
-              <a href="#" aria-label="Instagram" className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10">
+              <a
+                href="#"
+                aria-label="Instagram"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10"
+              >
                 <Instagram className="w-5 h-5" />
               </a>
-              <a href="#" aria-label="LinkedIn" className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10">
+              <a
+                href="#"
+                aria-label="LinkedIn"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10"
+              >
                 <Linkedin className="w-5 h-5" />
               </a>
             </div>
           </div>
 
-          {/* About */}
           <div>
             <h4 className="text-white font-semibold">About</h4>
             <ul className="mt-3 space-y-2 text-white/70 text-sm">
               <li>
-                <a href="#home" onClick={go("home")} className="hover:text-white">
+                <a
+                  href="#home"
+                  onClick={go("home")}
+                  className="hover:text-white"
+                >
                   Home
                 </a>
               </li>
               <li>
-                <a href="#about" onClick={go("about")} className="hover:text-white">
+                <a
+                  href="#about"
+                  onClick={go("about")}
+                  className="hover:text-white"
+                >
                   About
                 </a>
               </li>
               <li>
-                <a href="#work" onClick={go("work")} className="hover:text-white">
+                <a
+                  href="#work"
+                  onClick={go("work")}
+                  className="hover:text-white"
+                >
                   Work
                 </a>
               </li>
               <li>
-                <a href="#contact" onClick={go("contact")} className="hover:text-white">
+                <a
+                  href="#contact"
+                  onClick={go("contact")}
+                  className="hover:text-white"
+                >
                   Contact
                 </a>
               </li>
             </ul>
           </div>
 
-          {/* Services */}
           <div>
             <h4 className="text-white font-semibold">Services</h4>
             <ul className="mt-3 space-y-2 text-white/70 text-sm">
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white"
+                >
                   Hotel & Venue Brokerage
                 </a>
               </li>
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white"
+                >
                   Production & AV
                 </a>
               </li>
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white"
+                >
                   Print & Branding
                 </a>
               </li>
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white"
+                >
                   Transport & Logistics
                 </a>
               </li>
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white"
+                >
                   Media & Content
                 </a>
               </li>
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white"
+                >
                   Experience Design
                 </a>
               </li>
             </ul>
           </div>
 
-          {/* Support */}
           <div>
             <h4 className="text-white font-semibold">Support</h4>
             <ul className="mt-3 space-y-2 text-white/70 text-sm">
               <li>
-                <a href="#contact" onClick={go("contact")} className="hover:text-white">
+                <a
+                  href="#contact"
+                  onClick={go("contact")}
+                  className="hover:text-white"
+                >
                   Get a quote
                 </a>
               </li>
               <li>
-                <a href="#contact" onClick={go("contact")} className="hover:text-white">
+                <a
+                  href="#contact"
+                  onClick={go("contact")}
+                  className="hover:text-white"
+                >
                   Contact
                 </a>
               </li>
@@ -1282,7 +1880,10 @@ function Footer() {
 
       <div className="border-t border-white/10">
         <Container className="py-6 flex flex-col md:flex-row items-center justify-between gap-4 text-xs md:text-sm text-white/60">
-          <div>© {new Date().getFullYear()} Starwaves Events & Congresses — SARL • Capital 5,000 TND</div>
+          <div>
+            © {new Date().getFullYear()} Starwaves Events & Congresses — SARL •
+            Capital 5,000 TND
+          </div>
           <div className="flex items-center gap-6">
             <a href="#home" onClick={go("home")} className="hover:text-white">
               Back to top
@@ -1294,9 +1895,86 @@ function Footer() {
   );
 }
 
-/**************************
- *  App (unlocked by default; burst FX on CTA click)
- **************************/
+/* =========================================================
+   App
+   =======================================================*/
+function AnimatedHeadline() {
+  const phrases = React.useMemo(
+    () => [
+      "we create worlds",
+      "we shape experiences",
+      "we stage congresses",
+      "we craft stories",
+    ],
+    []
+  );
+  return (
+    <span className="bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] bg-clip-text text-transparent inline-block">
+      <TypeCycle phrases={phrases} />
+    </span>
+  );
+}
+
+function TypeCycle({
+  phrases,
+  typingSpeed = 70,
+  deletingSpeed = 45,
+  pause = 1400,
+  jitter = 12,
+}: {
+  phrases: string[];
+  typingSpeed?: number;
+  deletingSpeed?: number;
+  pause?: number;
+  jitter?: number;
+}) {
+  const [text, setText] = React.useState("");
+  const [i, setI] = React.useState(0);
+  const [del, setDel] = React.useState(false);
+  const longest = React.useMemo(
+    () => phrases.reduce((m, p) => Math.max(m, p.length), 0),
+    [phrases]
+  );
+
+  React.useEffect(() => {
+    const current = phrases[i % phrases.length];
+    const done = text === current;
+    const empty = text.length === 0;
+    let t: number | undefined;
+
+    const d = (base: number) => base + Math.floor(Math.random() * jitter);
+
+    if (!del) {
+      if (!done)
+        t = window.setTimeout(
+          () => setText(current.slice(0, text.length + 1)),
+          d(typingSpeed)
+        );
+      else t = window.setTimeout(() => setDel(true), pause);
+    } else {
+      if (!empty)
+        t = window.setTimeout(() => setText(text.slice(0, -1)), d(deletingSpeed));
+      else {
+        setDel(false);
+        setI((v) => (v + 1) % phrases.length);
+      }
+    }
+    return () => {
+      if (t) clearTimeout(t);
+    };
+  }, [text, del, i, phrases, typingSpeed, deletingSpeed, pause, jitter]);
+
+  return (
+    <span
+      className="inline-flex items-center align-middle"
+      style={{ minWidth: `${Math.ceil(longest * 0.62)}ch` }}
+    >
+      <span>{text}</span>
+      <span className="ml-1 w-[2px] h-[1em] bg-white/80 animate-pulse" />
+    </span>
+  );
+}
+
 export default function App() {
   const scrollTo = useSmoothScroll();
   const mag1 = useMagnetic();
@@ -1305,26 +1983,10 @@ export default function App() {
   const [fxKey, setFxKey] = React.useState(0);
   const auroraRef = React.useRef<{ burst: () => void } | null>(null);
 
-  // Smoke tests
-  React.useEffect(() => {
-    console.assert(typeof auroraRef.current?.burst === "function", "AuroraBackground exposes burst()");
-    console.assert(!!document.getElementById("home"), "#home section exists");
-    const sc = document.querySelectorAll('[data-test="service-card"]').length;
-    const wc = document.querySelectorAll('[data-test="work-card"]').length;
-    const rings = document.querySelectorAll('[data-test="grad-ring"]').length;
-    console.assert(sc === 6, `expected 6 service cards got ${sc}`);
-    console.assert(wc === 3, `expected 3 work cards got ${wc}`);
-    console.assert(rings === sc + wc, `expected ${sc + wc} gradient rings got ${rings}`);
-    const form = document.getElementById("contact-form");
-    console.assert(!!form, "contact form exists");
-    const footerEl = document.getElementById("footer");
-    console.assert(!!footerEl, "footer exists");
-  }, []);
-
   const runUnlock = (targetId: string) => {
     if (unlocking) return;
-    if (auroraRef.current && auroraRef.current.burst) auroraRef.current.burst();
-    setFxKey((k) => k + 1); // trigger UnlockFX overlay
+    auroraRef.current?.burst?.();
+    setFxKey((k) => k + 1);
     setUnlocking(true);
     window.setTimeout(() => {
       setUnlocking(false);
@@ -1332,264 +1994,352 @@ export default function App() {
     }, 900);
   };
 
-  function LogoMarquee() {
-    const logos = [
-      { src: "/logos/ENIT SB.png", alt: "IEEE ENIT SB" },
-      { src: "/logos/iip esprit.png", alt: "IEEE IIP ESPRIT" },
-      { src: "/logos/ESPRIT SB.svg", alt: "IEEE ESPRIT SB" },
-      { src: "/logos/sec.png", alt: "IEEE Tunisia Section" },
-    ];
-
-    const Row = ({ second = false }: { second?: boolean }) => (
-      <div className={`marquee-track ${second ? "second" : ""} flex items-center gap-10 sm:gap-16 md:gap-24 shrink-0`}>
-        {Array.from({ length: 2 }).map((_, i) =>
-          logos.map((l, idx) => (
-            <img
-              key={`${i}-${idx}-${l.alt}`}
-              src={l.src}
-              alt={l.alt}
-              className="h-10 sm:h-12 md:h-16 lg:h-20 object-contain opacity-90"
-              loading="lazy"
-              decoding="async"
-            />
-          ))
-        )}
-      </div>
-    );
-
-    return (
-      <div
-        className="relative overflow-hidden group"
-        style={{
-          WebkitMaskImage: "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
-          maskImage: "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
-        }}
-      >
-        <div className="flex items-center">
-          <Row />
-          <Row second />
-        </div>
-
-        <style>{`
-          @keyframes marqueeRowA { from { transform: translateX(0); } to { transform: translateX(-100%); } }
-          @keyframes marqueeRowB { from { transform: translateX(100%); } to { transform: translateX(0%); } }
-          .marquee-track { animation: marqueeRowA 45s linear infinite; }
-          .marquee-track.second { animation: marqueeRowB 45s linear infinite; }
-          .group:hover .marquee-track { animation-play-state: paused; }
-        `}</style>
-      </div>
-    );
-  }
-
   return (
-    <div className={`relative min-h-screen text-white overflow-x-hidden bg-[#06070B]`}>
+    <div className="relative min-h-screen text-white overflow-x-hidden bg-[#06070B]">
       <AuroraBackground ref={auroraRef} />
       <ScrollProgressBar />
       <Nav />
-
+  <CTADock onQuote={() => runUnlock("contact")} />
       <main className="relative z-10">
         {/* HERO */}
-        <section id="home" className="relative min-h-[calc(100vh-56px)] pt-14 md:pt-16 flex flex-col items-center justify-center text-center overflow-hidden">
+        <section
+          id="home"
+          className="relative min-h-[calc(100vh-56px)] pt-14 md:pt-16 flex flex-col items-center justify-center text-center overflow-hidden"
+        >
+          <div className="absolute inset-x-0 top-14 z-[-1] h-40 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
+<div
+  aria-hidden
+  className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(255,255,255,0.06),transparent_60%)]"
+/>
+          
+
           <Container>
-            <Reveal>
+            <div className="mx-auto max-w-6xl">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
+                <BadgeCheck className="w-4 h-4" />
+                ISO-style ops, hotel brokerage, AV & media under one roof
+              </div>
+            </div>
+
+            <div className="mt-5">
               <h1 className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl font-semibold leading-[1.08] md:leading-[1.05] max-w-6xl mx-auto">
                 We don’t organize events,
                 <br className="hidden md:block" />
                 <AnimatedHeadline />
               </h1>
-            </Reveal>
-            <Reveal delay={120}>
               <p className="mt-6 text-sm sm:text-base md:text-lg text-white/80 max-w-3xl mx-auto">
-                Event & Congress Management • Hotel Brokerage • Media & Experience Design
+                Event & Congress Management • Hotel Brokerage • Media &
+                Experience Design
               </p>
-            </Reveal>
-            <Reveal delay={240}>
-              <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row justify-center gap-3 sm:gap-4">
+
+              <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
                 <button
                   ref={mag1}
-                  onClick={() => runUnlock("contact")}
-                  className={`inline-flex items-center justify-center gap-2 px-6 sm:px-7 py-3.5 rounded-2xl text-sm md:text-base bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 will-change-transform ${
-                    unlocking ? "animate-pulse" : "hover:opacity-90"
-                  }`}
+                  onClick={() => runUnlock("services")}
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-white text-black font-semibold hover:opacity-90"
                 >
-                  Plan your event <ArrowRight className="w-5 h-5" aria-hidden="true" />
+                  Explore services <ArrowRight className="w-4 h-4" />
                 </button>
                 <button
                   ref={mag2}
-                  onClick={() => runUnlock("work")}
-                  className={`inline-flex items-center justify-center gap-2 px-6 sm:px-7 py-3.5 rounded-2xl text-sm md:text-base bg-white/5 border border-white/10 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 will-change-transform ${
-                    unlocking ? "animate-pulse" : "hover:bg-white/10"
-                  }`}
+                  onClick={() => runUnlock("contact")}
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90"
                 >
-                  See our work <Play className="w-5 h-5" aria-hidden="true" />
+                  Get a quote <Mail className="w-4 h-4" />
                 </button>
               </div>
-            </Reveal>
-            <button onClick={() => runUnlock("services")} className="mt-12 sm:mt-16 inline-flex flex-col items-center text-white/60 text-xs tracking-wider hover:text-white/80 transition">
-              SCROLL
-              <span className="block w-px h-8 mt-2 bg-white/30" />
-            </button>
+
+              <div className="mt-10 grid grid-cols-3 gap-3 max-w-xl mx-auto">
+                <CountUp to={120} label="Congress days / yr" />
+                <CountUp to={20} label="Cities covered" />
+                <CountUp to={45000} label="Guests hosted" />
+              </div>
+            </div>
           </Container>
         </section>
 
-        {/* CONTENT (always visible; no lock) */}
-        <div>
-          {/* SERVICES */}
-          <Section id="services" className="pt-12 sm:pt-20">
-            <Reveal>
-              <h2 className="text-3xl sm:text-4xl md:text-6xl font-semibold mb-8 sm:mb-10">
-                Services <SwapWords items={["Hotel • AV • Media", "Print • Wayfinding", "Transport • Logistics"]} />
+        {/* SERVICES */}
+        <Section id="services">
+          <Reveal>
+            <div className="flex items-center justify-between gap-6">
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold">
+                Services
               </h2>
-            </Reveal>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 md:gap-7">
-              <Reveal>
-                <ServiceCard title="Hotel & Venue Brokerage" desc="Spaces that inspire. We secure the right venues for unforgettable congresses." />
-              </Reveal>
-              <Reveal delay={120}>
-                <ServiceCard title="Production & AV" desc="Stage, lighting, LED, sound engineering and show direction with cinematic precision." />
-              </Reveal>
-              <Reveal delay={240}>
-                <ServiceCard title="Print & Branding" desc="Immersive signage, wayfinding, and premium event collateral." />
-              </Reveal>
-              <Reveal>
-                <ServiceCard title="Transport & Logistics" desc="Seamless delegate journeys — timed, tracked, and stress-free." />
-              </Reveal>
-              <Reveal delay={120}>
-                <ServiceCard title="Media & Content" desc="Cinematic photography, video, live streaming, editors and post." />
-              </Reveal>
-              <Reveal delay={240}>
-                <ServiceCard title="Experience Design" desc="Concepts, scenography and storytelling for every journey." />
-              </Reveal>
+              <div className="text-white/70 text-sm">
+                End-to-end, modular, and accountable.
+              </div>
             </div>
-          </Section>
+          </Reveal>
 
-          {/* PARTNERS / MARQUEE */}
-          <Section id="partners" className="py-12 sm:py-16">
-            <h3 className="text-center text-white/80 mb-6">Trusted by teams at</h3>
-            <Container>
-              <LogoMarquee />
-            </Container>
-          </Section>
+          <div className="mt-8 grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <Reveal delay={50}>
+              <ServiceCard
+                Icon={Building2}
+                title="Hotel & Venue Brokerage"
+                desc="Contracting, rooming lists, allotments, attrition, and onsite desk."
+                points={[
+                  "Citywide & resort destinations",
+                  "Allotment & attrition strategy",
+                  "Onsite front-desk integration",
+                ]}
+              />
+            </Reveal>
 
-          {/* WORK */}
-          <Section id="work" className="pt-4">
+            <Reveal delay={100}>
+              <ServiceCard
+                Icon={MonitorSpeaker}
+                title="Production & AV"
+                desc="Stagecraft, LED, projection, audio, lighting, simultaneous translation."
+                points={[
+                  "Stage design & CADs",
+                  "LED / projection mapping",
+                  "Hybrid & livestream",
+                ]}
+              />
+            </Reveal>
+
+            <Reveal delay={150}>
+              <ServiceCard
+                Icon={Printer}
+                title="Print & Branding"
+                desc="Wayfinding, lanyards, badges, backdrops, booths — installed overnight."
+                points={[
+                  "Large-format & eco inks",
+                  "Brand guardianship",
+                  "Onsite make-good team",
+                ]}
+              />
+            </Reveal>
+
+            <Reveal delay={200}>
+              <ServiceCard
+                Icon={Bus}
+                title="Transport & Logistics"
+                desc="Fleet planning, manifests, arrivals, dispatch, last-mile ops."
+                points={[
+                  "Airport & VIP protocols",
+                  "Shuttle routing & stewards",
+                  "Risk & contingency playbooks",
+                ]}
+              />
+            </Reveal>
+
+            <Reveal delay={250}>
+              <ServiceCard
+                Icon={Video}
+                title="Media & Content"
+                desc="Openers, recaps, titles, speaker support, photography, social clips."
+                points={["Editorial boards", "Motion graphics", "Same-day edits"]}
+              />
+            </Reveal>
+
+            <Reveal delay={300}>
+              <ServiceCard
+                Icon={Palette}
+                title="Experience Design"
+                desc="Attendee journey mapping, scenography, gamified touchpoints."
+                points={[
+                  "Flows & service design",
+                  "Installations & micro-wow",
+                  "Inclusive & accessible",
+                ]}
+              />
+            </Reveal>
+          </div>
+        </Section>
+
+        {/* PARTNERS */}
+        <Section id="partners" className="pt-4">
+          <Reveal>
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold mb-6">
+              Trusted by chapters & institutions
+            </h2>
+            <div
+              className="relative overflow-hidden group"
+              style={{
+                WebkitMaskImage:
+                  "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
+                maskImage:
+                  "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
+              }}
+            >
+              <div className="flex gap-16 items-center animate-[marq_35s_linear_infinite] group-hover:[animation-play-state:paused]">
+                {[
+                  "/logos/ENIT SB.png",
+                  "/logos/iip esprit.png",
+                  "/logos/ESPRIT SB.svg",
+                  "/logos/sec.png",
+                ].map((src, i) => (
+                  <img
+                    key={i}
+                    src={src}
+                    alt="Partner logo"
+                    className="h-12 sm:h-14 md:h-16 object-contain opacity-90"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ))}
+                {[
+                  "/logos/ENIT SB.png",
+                  "/logos/iip esprit.png",
+                  "/logos/ESPRIT SB.svg",
+                  "/logos/sec.png",
+                ].map((src, i) => (
+                  <img
+                    key={`dup-${i}`}
+                    src={src}
+                    alt="Partner logo"
+                    className="h-12 sm:h-14 md:h-16 object-contain opacity-90"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ))}
+              </div>
+              <style>{`
+                @keyframes marq { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+              `}</style>
+            </div>
+          </Reveal>
+        </Section>
+
+        {/* WORK */}
+        <Section id="work">
+          <Reveal>
+            <div className="flex items-center justify-between gap-6">
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold">
+                Our Worlds
+              </h2>
+              <div className="text-white/70 text-sm">
+                Highlights from conferences & festivals.
+              </div>
+            </div>
+          </Reveal>
+
+          <div className="mt-8 grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <Reveal delay={50}>
+              <WorkCard
+                role="Congress operations"
+                title="IASTAM 5.0 2025"
+                tags={["1,800 pax", "4 hotels", "2 live stages"]}
+              />
+            </Reveal>
+            <Reveal delay={100}>
+              <WorkCard
+                role="Congress operations"
+                title="WIE ACT 4.0"
+                tags={["6K sqm", "Booth build", "Wayfinding"]}
+              />
+            </Reveal>
+            <Reveal delay={150}>
+              <WorkCard
+                role="Media & broadcast"
+                title="Gov Innovation Forum"
+                tags={["3-cam studio", "Live captions", "Multilang stream"]}
+              />
+            </Reveal>
+          </div>
+        </Section>
+
+  {/* PROCESS */}
+  <ProcessSection />
+
+  {/* TESTIMONIALS */}
+  <Testimonials />
+
+        {/* ABOUT */}
+        <Section id="about">
+          <div className="grid lg:grid-cols-2 gap-8">
             <Reveal>
-              <h2 className="text-3xl sm:text-4xl md:text-6xl font-semibold mb-8 sm:mb-10">Our Worlds</h2>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-8">
+                <h3 className="text-xl font-semibold">Why Starwaves</h3>
+                <p className="mt-3 text-white/80">
+                  We run congresses like productions: one schedule, one budget,
+                  one accountable team. Our ops fuse hospitality, broadcast, and
+                  brand design so attendees feel guided — and clients feel
+                  safe.
+                </p>
+                <ul className="mt-4 space-y-2 text-white/70 text-sm">
+                  <li className="flex gap-2">
+                    <Star className="w-4 h-4 mt-0.5" />
+                    Cost control & transparent quotes
+                  </li>
+                  <li className="flex gap-2">
+                    <Star className="w-4 h-4 mt-0.5" />
+                    Backup plans & risk playbooks
+                  </li>
+                  <li className="flex gap-2">
+                    <Star className="w-4 h-4 mt-0.5" />
+                    Inclusive & accessible experiences
+                  </li>
+                </ul>
+              </div>
             </Reveal>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 md:gap-7">
-              <Reveal>
-                <WorkCard title="CSTAM Congress 2024" role="Media & Branding" />
-              </Reveal>
-              <Reveal delay={150}>
-                <WorkCard title="IASTAM 5.0 2025" role="Full Event Management" />
-              </Reveal>
-              <Reveal delay={300}>
-                <WorkCard title="WIE ACT 4.0 2025" role="Hotel & AV Coordination" />
-              </Reveal>
-            </div>
-          </Section>
 
-          {/* ABOUT + STATS */}
-          <Section id="about">
-            <div className="grid md:grid-cols-2 gap-8 sm:gap-12 items-start">
-              <Reveal>
-                <div>
-                  <h2 className="text-3xl sm:text-4xl md:text-6xl font-semibold mb-4">Cinematic Minds, Tunisian Roots</h2>
-                  <p className="text-white/80 text-sm sm:text-base md:text-lg">
-                    We’re a creative operations team turning congresses into cinematic worlds. From hotel blocks and transport to AV, print, and media — everything flows in one orchestrated system.
-                  </p>
-                  <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-6">
-                    <CountUp to={300} label="Participants served" />
-                    <CountUp to={12} label="Major congresses" />
-                    <CountUp to={45} label="Hotel partners" />
+            <Reveal delay={80}>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-8">
+                <h3 className="text-xl font-semibold">At a glance</h3>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                    <div className="text-2xl font-semibold">+10yrs</div>
+                    <div className="text-xs text-white/70">Track record</div>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                    <div className="text-2xl font-semibold">Tier-1</div>
+                    <div className="text-xs text-white/70">Hotel partners</div>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                    <div className="text-2xl font-semibold">In-house</div>
+                    <div className="text-xs text-white/70">Media team</div>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                    <div className="text-2xl font-semibold">Turnkey</div>
+                    <div className="text-xs text-white/70">A→Z delivery</div>
                   </div>
                 </div>
-              </Reveal>
-              <Reveal delay={150}>
-                <div className="rounded-2xl border border-white/10 p-6 sm:p-7 md:p-8 bg-white/5 backdrop-blur-sm">
-                  <ul className="space-y-3 text-white/80 text-sm md:text-base">
-                    <li>
-                      <span className="text-white">2025</span> — IASTAM 5.0 • Full Event Ops
-                    </li>
-                    <li>
-                      <span className="text-white">2024</span> — WIE ACT 4.0 • Hotel & AV
-                    </li>
-                    <li>
-                      <span className="text-white">2024</span> — CSTAM • Media & Branding
-                    </li>
-                    <li>
-                      <span className="text-white">2023</span> — IEEE IES SYP • Experience Design
-                    </li>
-                  </ul>
-                </div>
-              </Reveal>
-            </div>
-          </Section>
-
-          {/* CONTACT */}
-          <Section id="contact" className="text-center">
-            <Reveal>
-              <h2 className="text-3xl sm:text-4xl md:text-6xl font-semibold mb-4">Get in Touch</h2>
+              </div>
             </Reveal>
-            <Reveal delay={120}>
-              <p className="text-white/80 mb-8 text-sm sm:text-base md:text-lg">Tell us about your congress and we’ll come back with a tailored plan.</p>
-            </Reveal>
+          </div>
+        </Section>
 
-            <div className="grid md:grid-cols-2 gap-6 sm:gap-8 items-start text-left">
-              {/* Info card */}
-              <Reveal delay={150}>
-                <div className="rounded-2xl border border-white/10 p-6 sm:p-7 md:p-8 bg-white/5 backdrop-blur-sm">
-                  <div className="flex flex-col gap-3 text-white/80 text-sm md:text-base">
-                    <a href="mailto:hello@starwaves.tn" className="inline-flex items-center gap-2">
-                      <Mail className="w-5 h-5 text-[#BA89FF]" aria-hidden="true" />
-                      hello@starwaves.tn
-                    </a>
-                    <div className="inline-flex items-center gap-2">
-                      <Phone className="w-5 h-5 text-[#BA89FF]" aria-hidden="true" />
-                      <span>+216 ••• ••• •••</span>
-                    </div>
-                    <div className="inline-flex items-center gap-2">
-                      <MapPin className="w-5 h-5 text-[#BA89FF]" aria-hidden="true" />
-                      <span>Ben Arous, Tunisia</span>
-                    </div>
+        {/* CONTACT */}
+        <Section id="contact">
+          <Reveal>
+            <div className="grid lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-1 space-y-5">
+                <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold">
+                  Let’s plan your next congress
+                </h2>
+                <p className="text-white/80">
+                  Tell us dates, city, headcount, and anything special. We’ll
+                  reply with a venue short-list and draft budget.
+                </p>
 
-                    <div className="pt-3 text-white/70 text-sm">
-                      <div className="font-medium text-white">To speed things up, include:</div>
-                      <ul className="list-disc list-inside mt-2 space-y-1">
-                        <li>Dates & city</li>
-                        <li>Headcount (tracks/plenary)</li>
-                        <li>Hotel rooms per night</li>
-                        <li>AV needs (LED / projection / streaming)</li>
-                        <li>Budget range</li>
-                      </ul>
-                    </div>
-
-                    <a
-                      href="https://www.facebook.com/Starwaves"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-4 inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition w-max"
-                    >
-                      <Facebook className="w-5 h-5" aria-hidden="true" />
-                      Follow us
-                    </a>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="flex items-center gap-2 text-white/80">
+                    <Phone className="w-4 h-4" /> +216 12 345 678
+                  </div>
+                  <div className="mt-2 flex items-center gap-2 text-white/80">
+                    <Mail className="w-4 h-4" /> hello@starwaves.tn
+                  </div>
+                  <div className="mt-2 flex items-center gap-2 text-white/80">
+                    <MapPin className="w-4 h-4" /> Tunis • Sousse • Hammamet
                   </div>
                 </div>
-              </Reveal>
+              </div>
 
-              {/* Form */}
-              <Reveal delay={240}>
+              <div className="lg:col-span-2">
                 <ContactForm />
-              </Reveal>
+              </div>
             </div>
-          </Section>
-
-          <Footer />
-        </div>
-
-        {/* Unlock effects layer */}
-        <UnlockFX trigger={fxKey} />
+          </Reveal>
+        </Section>
       </main>
+
+      <Footer />
+  <BackToTop />
+
+      {/* FX */}
+      {unlocking && <UnlockFX trigger={fxKey} />}
     </div>
   );
 }
