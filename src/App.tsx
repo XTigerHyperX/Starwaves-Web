@@ -25,23 +25,61 @@ import {
 import "./index.css";
 
 /* =========================================================
-   Aurora Canvas Background (with burst API)
+   Performance Monitor
    =======================================================*/
-const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
+const usePerformanceMonitor = () => {
+  const [quality, setQuality] = React.useState(1);
+  const frameTimesRef = React.useRef<number[]>([]);
+  const lastFrameRef = React.useRef(0);
+
+  const recordFrame = React.useCallback(() => {
+    const now = performance.now();
+    if (lastFrameRef.current) {
+      const frameTime = now - lastFrameRef.current;
+      frameTimesRef.current.push(frameTime);
+      
+      // Keep only last 60 frames
+      if (frameTimesRef.current.length > 60) {
+        frameTimesRef.current.shift();
+      }
+      
+      // Adjust quality every 30 frames
+      if (frameTimesRef.current.length >= 30 && frameTimesRef.current.length % 30 === 0) {
+        const avgFrameTime = frameTimesRef.current.reduce((a, b) => a + b, 0) / frameTimesRef.current.length;
+        const fps = 1000 / avgFrameTime;
+        
+        if (fps < 45 && quality > 0.5) {
+          setQuality(prev => Math.max(0.5, prev - 0.1));
+        } else if (fps > 55 && quality < 1) {
+          setQuality(prev => Math.min(1, prev + 0.05));
+        }
+      }
+    }
+    lastFrameRef.current = now;
+  }, [quality]);
+
+  return { quality, recordFrame };
+};
+
+/* =========================================================
+   Aurora Canvas Background (optimized)
+   =======================================================*/
+const AuroraBackground = React.memo(React.forwardRef<{ burst: () => void }>(function AuroraBackground(_, ref) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const scrollRef = React.useRef(0);
   const rafRef = React.useRef<number | null>(null);
-  const burstRef = React.useRef(0); // 0..1 burst intensity
+  const burstRef = React.useRef(0);
+  const lastFrameRef = React.useRef(0);
+  const { quality, recordFrame } = usePerformanceMonitor();
 
   React.useImperativeHandle(ref, () => ({
     burst: () => {
-      // Massive magical burst: higher intensity, longer duration
       burstRef.current = 2.5;
       const start = performance.now();
       const dur = 1600;
       const step = (t: number) => {
         const p = Math.min(1, (t - start) / dur);
-        burstRef.current = 2.5 * (1 - p); // much stronger burst
+        burstRef.current = 2.5 * (1 - p);
         if (p < 1) requestAnimationFrame(step);
       };
       requestAnimationFrame(step);
@@ -51,17 +89,16 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
   React.useEffect(() => {
     const c = canvasRef.current!;
     const ctx = c.getContext("2d")!;
-    let w = 0,
-      h = 0,
-      dpr = Math.min(2, window.devicePixelRatio || 1);
+    let w = 0, h = 0, dpr = Math.min(2, window.devicePixelRatio || 1);
 
     let stars: { x: number; y: number; r: number; z: number; p: number }[] = [];
 
     const isCoarse = window.matchMedia && !window.matchMedia("(pointer: fine)").matches;
+    const prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const buildStars = () => {
       const base = Math.max(220, Math.floor((w * h) / 12000));
-      const starCount = Math.floor(base * (isCoarse ? 0.65 : 1)); // fewer stars on mobile for perf
+      const starCount = Math.floor(base * (isCoarse ? 0.4 : 0.7) * quality);
       stars = Array.from({ length: starCount }, () => ({
         x: Math.random() * w,
         y: Math.random() * h,
@@ -76,7 +113,7 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
     const resize = () => {
       w = window.innerWidth;
       h = window.innerHeight;
-      dpr = Math.min(2, window.devicePixelRatio || 1);
+            dpr = Math.min(1.5, window.devicePixelRatio || 1);
       c.style.width = w + "px";
       c.style.height = h + "px";
       c.width = Math.floor(w * dpr);
@@ -87,7 +124,6 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
       gradCache.vignette = null;
     };
 
-    // Debounce resize and scroll for performance
     let resizeTimeout: number | null = null;
     const onResize = () => {
       if (resizeTimeout) window.clearTimeout(resizeTimeout);
@@ -95,14 +131,7 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
     };
     window.addEventListener("resize", onResize, { passive: true });
 
-    let scrollTimeout: number | null = null;
-    const onScroll = () => {
-      if (scrollTimeout) window.clearTimeout(scrollTimeout);
-      scrollTimeout = window.setTimeout(() => {
-        scrollRef.current = window.scrollY || 0;
-      }, 60);
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
+  // We'll read scroll position in the frame loop to avoid quantization flicker
 
     const gradientMain = () => {
       if (gradCache.main) return gradCache.main;
@@ -125,12 +154,24 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
       return vg;
     };
 
-    const prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
     resize();
 
+    // Pause rendering when tab is hidden
+    const onVis = () => {
+      if (document.hidden) {
+        if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      } else if (rafRef.current == null && !prefersReduced) {
+        lastFrameRef.current = 0;
+        rafRef.current = requestAnimationFrame(frame);
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+
     function drawStars(t: number) {
-      for (const s of stars) {
+      const step = Math.max(1, Math.floor(1 / quality));
+      for (let i = 0; i < stars.length; i += step) {
+        const s = stars[i];
         const f = 0.55 + 0.45 * Math.sin(s.p + t * 0.003);
         const y = s.y + scrollRef.current * 0.02 * (1 - s.z);
         ctx.fillStyle = `rgba(255,255,255,${0.58 * s.z * f})`;
@@ -155,19 +196,25 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
       return { y0, y1, y2, y3 };
     };
 
+    let shimmerGrad: CanvasGradient | null = null;
+    let shimmerUntil = -1;
     const gradientShimmer = (t: number) => {
+      // Recreate shimmer gradient at most every ~32ms to prevent flicker
+      if (shimmerGrad && t < shimmerUntil) return shimmerGrad;
       const sweep = (Math.sin(t * 0.00055) + 1) * 0.5;
       const g = ctx.createLinearGradient(0, h * (0.5 - 0.06 + sweep * 0.12), 0, h * (0.5 + 0.06 + sweep * 0.12));
       g.addColorStop(0, "rgba(255,255,255,0)");
       g.addColorStop(0.5, "rgba(255,255,255,0.08)");
       g.addColorStop(1, "rgba(255,255,255,0)");
+      shimmerGrad = g;
+      shimmerUntil = t + 32; // cache for ~2 frames
       return g;
     };
 
     function striations(x0: number, y0: number, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, t: number, widthBase: number) {
       ctx.save();
       ctx.globalCompositeOperation = "screen";
-      const lines = 18;
+      const lines = Math.floor(18 * quality);
       for (let i = 0; i < lines; i++) {
         const k = i / (lines - 1);
         const r = Math.round(108 + (186 - 108) * k);
@@ -187,30 +234,30 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
       ctx.restore();
     }
 
-    function drawAurora(t: number) {
+  function drawAurora(t: number) {
       const parY = Math.min(90, scrollRef.current * 0.09);
-  const boost = 1 + burstRef.current * 2.5; // much stronger during burst
+      const boost = 1 + burstRef.current * 2.5;
 
       ctx.save();
       ctx.translate(w * 0.5, h * 0.5 + parY);
-      const s = 1 + burstRef.current * 0.12; // noticeable scale
+      const s = 1 + burstRef.current * 0.12;
       ctx.scale(s, s);
       ctx.rotate(-0.34);
       ctx.translate(-w * 0.75, -h * 0.5);
 
-      const lgx = -w * 0.4,
-        lgy = h * 0.46;
+  const lgx = -w * 0.4, lgy = h * 0.46;
       const lg = ctx.createRadialGradient(lgx, lgy, 0, lgx, lgy, Math.max(w, h) * 0.85);
       lg.addColorStop(0, `rgba(108,164,255,${0.4 * (1 + burstRef.current * 0.8)})`);
       lg.addColorStop(1, "rgba(108,164,255,0.00)");
       ctx.fillStyle = lg;
       ctx.fillRect(-w, -h, w * 2, h * 2);
 
-      const m = ctrls(t, 0, 1);
-      const X0 = -w * 0.28,
-        X1 = w * 0.25,
-        X2 = w * 0.6,
-        X3 = w * 1.3;
+  const X0 = -w * 0.28, X1 = w * 0.25, X2 = w * 0.6, X3 = w * 1.3;
+  const m = ctrls(t, 0, 1);
+  // Build path once and reuse across strokes
+  const pathMain = new Path2D();
+  pathMain.moveTo(X0, m.y0);
+  pathMain.bezierCurveTo(X1, m.y1, X2, m.y2, X3, m.y3);
       let WMAIN = Math.max(120, Math.min(185, w * 0.1));
       let WECHO = Math.max(90, Math.min(130, w * 0.072));
       WMAIN *= boost;
@@ -218,49 +265,50 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
 
       ctx.globalCompositeOperation = "screen";
 
-      ctx.filter = `blur(${28 * boost}px) saturate(${140 + burstRef.current * 60}%)`;
-      ctx.strokeStyle = gradientMain();
-      ctx.beginPath();
-      ctx.moveTo(X0, m.y0);
-      ctx.bezierCurveTo(X1, m.y1, X2, m.y2, X3, m.y3);
-      ctx.lineWidth = WMAIN;
-      ctx.stroke();
+  // Keep blur radii stable to avoid flicker when adaptive quality changes
+  ctx.filter = `blur(${28 * boost}px) saturate(${140 + burstRef.current * 60}%)`;
+  ctx.strokeStyle = gradientMain();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = WMAIN;
+  ctx.stroke(pathMain);
 
-      ctx.filter = `blur(${18 * boost}px) saturate(${150 + burstRef.current * 60}%)`;
+  ctx.filter = `blur(${18 * boost}px) saturate(${150 + burstRef.current * 60}%)`;
       ctx.strokeStyle = gradientShimmer(t);
-      ctx.beginPath();
-      ctx.moveTo(X0, m.y0);
-      ctx.bezierCurveTo(X1, m.y1, X2, m.y2, X3, m.y3);
-      ctx.lineWidth = WMAIN * 0.55;
-      ctx.stroke();
+  ctx.lineWidth = WMAIN * 0.55;
+  ctx.stroke(pathMain);
 
-      const e = ctrls(t, 64, 0.9);
-      ctx.filter = `blur(${38 * boost}px) saturate(${140 + burstRef.current * 50}%)`;
+  const e = ctrls(t, 64, 0.9);
+  const pathEcho = new Path2D();
+  pathEcho.moveTo(X0, e.y0);
+  pathEcho.bezierCurveTo(X1, e.y1, X2, e.y2, X3, e.y3);
+  ctx.filter = `blur(${38 * boost}px) saturate(${140 + burstRef.current * 50}%)`;
       ctx.globalAlpha = 0.45;
       ctx.strokeStyle = gradientMain();
-      ctx.beginPath();
-      ctx.moveTo(X0, e.y0);
-      ctx.bezierCurveTo(X1, e.y1, X2, e.y2, X3, e.y3);
-      ctx.lineWidth = WECHO;
-      ctx.stroke();
+  ctx.lineWidth = WECHO;
+  ctx.stroke(pathEcho);
       ctx.globalAlpha = 1;
 
-      striations(X0, m.y0, X1, m.y1, X2, m.y2, X3, m.y3, t, WMAIN);
+      if (quality > 0.7) {
+        striations(X0, m.y0, X1, m.y1, X2, m.y2, X3, m.y3, t, WMAIN);
+      }
       ctx.restore();
 
-      // constellation lines
-      (function drawConstellations() {
+      // Constellation lines (optimized)
+  if (quality > 0.6) {
         ctx.save();
         ctx.globalCompositeOperation = "screen";
-        ctx.filter = `blur(${1 + burstRef.current * 1.5}px)`;
+  ctx.filter = `blur(${1 + burstRef.current * 1.5}px)`;
         const maxDist = 110 + burstRef.current * 120;
         ctx.lineWidth = 0.6;
-        for (let i = 0; i < stars.length; i += 2) {
+    const step = Math.max(1, Math.floor(2 / quality));
+    let linesDrawn = 0;
+    const maxLines = Math.floor(300 * quality);
+    outer: for (let i = 0; i < stars.length; i += step * 2) {
           const a = stars[i];
-          for (let j = i + 1; j < Math.min(i + 18, stars.length); j += 3) {
+          for (let j = i + 1; j < Math.min(i + 18, stars.length); j += step * 3) {
             const b = stars[j];
-            const dx = a.x - b.x,
-              dy = a.y - b.y;
+            const dx = a.x - b.x, dy = a.y - b.y;
             const d = Math.hypot(dx, dy);
             if (d < maxDist) {
               const alpha = (1 - d / maxDist) * 0.18 * (0.6 + 0.4 * burstRef.current);
@@ -269,22 +317,34 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
               ctx.moveTo(a.x, a.y);
               ctx.lineTo(b.x, b.y);
               ctx.stroke();
+      if (++linesDrawn >= maxLines) break outer;
             }
           }
         }
         ctx.restore();
-      })();
+      }
 
-      ctx.filter = "none";
-      ctx.fillStyle = gradientVignette();
-      ctx.fillRect(0, 0, w, h);
+  ctx.filter = "none";
+  ctx.fillStyle = gradientVignette();
+  ctx.fillRect(0, 0, w, h);
     }
 
     function frame(t: number) {
+      // Frame rate limiting
+      if (t - lastFrameRef.current < 16.67) {
+        rafRef.current = requestAnimationFrame(frame);
+        return;
+      }
+      
+      recordFrame();
+  // Read scroll inline to avoid event batching artifacts
+  scrollRef.current = window.scrollY || 0;
+      
       ctx.filter = "none";
       ctx.clearRect(0, 0, w, h);
       drawStars(t);
       drawAurora(t);
+      lastFrameRef.current = t;
       rafRef.current = requestAnimationFrame(frame);
     }
 
@@ -298,18 +358,18 @@ const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
 
     return () => {
       window.removeEventListener("resize", onResize);
-      window.removeEventListener("scroll", onScroll);
+      document.removeEventListener("visibilitychange", onVis);
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, []);
+  }, [quality, recordFrame]);
 
   return <canvas ref={canvasRef} className="fixed inset-0 z-0 pointer-events-none" />;
-});
+}));
 
 /* =========================================================
    Layout helpers
    =======================================================*/
-function Container({
+const Container = React.memo(function Container({
   children,
   className = "",
 }: {
@@ -321,9 +381,9 @@ function Container({
       {children}
     </div>
   );
-}
+});
 
-function Section({
+const Section = React.memo(function Section({
   id,
   className = "",
   children,
@@ -333,30 +393,34 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-  <section id={id} className={`relative py-12 sm:py-16 md:py-20 ${className}`}>
+    <section
+      id={id}
+      className={`relative py-12 sm:py-16 md:py-20 ${className}`}
+      style={{ contentVisibility: "auto", containIntrinsicSize: "800px" }}
+    >
       <Orbs />
       <Container>{children}</Container>
     </section>
   );
-}
+});
 
 /* =========================================================
-   Micro-interactions
+   Micro-interactions (optimized)
    =======================================================*/
 function useSmoothScroll() {
-  // Memoize ease function
   const ease = React.useCallback(
-    (t: number) =>
-      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+    (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
     []
   );
 
-  const reduced =
+  const reduced = React.useMemo(() =>
     typeof window !== "undefined" &&
     window.matchMedia &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    []
+  );
 
-  return (id: string) => {
+  return React.useCallback((id: string) => {
     const el = document.getElementById(id);
     if (!el) return;
     const header = 56;
@@ -379,14 +443,15 @@ function useSmoothScroll() {
       if (p < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
-  };
+  }, [ease, reduced]);
 }
 
 function useActiveSection(ids: string[]) {
   const [active, setActive] = React.useState(ids[0]);
+  
   React.useEffect(() => {
-    // Only observe if IntersectionObserver is supported
     if (!('IntersectionObserver' in window)) return;
+    
     const obs = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
@@ -395,76 +460,112 @@ function useActiveSection(ids: string[]) {
       },
       { rootMargin: "-40% 0px -55% 0px", threshold: 0.01 }
     );
+    
     ids.forEach((id) => {
       const el = document.getElementById(id);
       if (el) obs.observe(el);
     });
+    
     return () => obs.disconnect();
   }, [ids]);
+  
   return active;
 }
 
 function useMagnetic() {
   const ref = React.useRef<HTMLButtonElement | null>(null);
+  
   React.useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || !window.matchMedia("(pointer: fine)").matches) return;
+    
+    let rafId: number | null = null;
+    
     const onMove = (e: MouseEvent) => {
-      const r = el.getBoundingClientRect();
-      const mx = e.clientX - (r.left + r.width / 2);
-      const my = e.clientY - (r.top + r.height / 2);
-      el.style.transform = `translate(${mx * 0.12}px, ${my * 0.12}px)`;
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        const r = el.getBoundingClientRect();
+        const mx = e.clientX - (r.left + r.width / 2);
+        const my = e.clientY - (r.top + r.height / 2);
+        el.style.transform = `translate(${mx * 0.12}px, ${my * 0.12}px)`;
+        rafId = null;
+      });
     };
-    const onLeave = () => (el.style.transform = `translate(0,0)`);
-    el.addEventListener("mousemove", onMove);
-    el.addEventListener("mouseleave", onLeave);
+    
+    const onLeave = () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      el.style.transform = `translate(0,0)`;
+    };
+    
+    el.addEventListener("mousemove", onMove, { passive: true });
+    el.addEventListener("mouseleave", onLeave, { passive: true });
+    
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       el.removeEventListener("mousemove", onMove);
       el.removeEventListener("mouseleave", onLeave);
     };
   }, []);
+  
   return ref;
 }
 
 function useTilt() {
   const ref = React.useRef<HTMLDivElement | null>(null);
+  
   React.useEffect(() => {
-    if (window.matchMedia && !window.matchMedia("(pointer: fine)").matches)
-      return;
+    if (!window.matchMedia("(pointer: fine)").matches) return;
+    
     const el = ref.current;
     if (!el) return;
+    
+    let rafId: number | null = null;
+    
     const onMove = (e: MouseEvent) => {
-      const r = el.getBoundingClientRect();
-      const px = (e.clientX - r.left) / r.width - 0.5;
-      const py = (e.clientY - r.top) / r.height - 0.5;
-      el.style.transform = `perspective(800px) rotateX(${(-py * 6).toFixed(
-        2
-      )}deg) rotateY(${(px * 8).toFixed(2)}deg)`;
-      el.style.boxShadow = `0 20px 40px rgba(186,137,255,0.10)`;
-      const ox = e.clientX - r.left;
-      const oy = e.clientY - r.top;
-      el.style.setProperty("--mx", `${ox}px`);
-      el.style.setProperty("--my", `${oy}px`);
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        const r = el.getBoundingClientRect();
+        const px = (e.clientX - r.left) / r.width - 0.5;
+        const py = (e.clientY - r.top) / r.height - 0.5;
+        el.style.transform = `perspective(800px) rotateX(${(-py * 6).toFixed(2)}deg) rotateY(${(px * 8).toFixed(2)}deg)`;
+        el.style.boxShadow = `0 20px 40px rgba(186,137,255,0.10)`;
+        const ox = e.clientX - r.left;
+        const oy = e.clientY - r.top;
+        el.style.setProperty("--mx", `${ox}px`);
+        el.style.setProperty("--my", `${oy}px`);
+        rafId = null;
+      });
     };
+    
     const reset = () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       el.style.transform = "";
       el.style.boxShadow = "";
     };
-    el.addEventListener("mousemove", onMove);
-    el.addEventListener("mouseleave", reset);
+    
+    el.addEventListener("mousemove", onMove, { passive: true });
+    el.addEventListener("mouseleave", reset, { passive: true });
+    
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       el.removeEventListener("mousemove", onMove);
       el.removeEventListener("mouseleave", reset);
     };
   }, []);
+  
   return ref;
 }
 
-
 /* =========================================================
-   Decorative Orbs
+   Decorative Orbs (memoized)
    =======================================================*/
-function Orbs() {
+const Orbs = React.memo(function Orbs() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
       <div
@@ -485,68 +586,80 @@ function Orbs() {
       />
     </div>
   );
-}
+});
 
 /* =========================================================
-   Back to top button
+   Back to top button (optimized)
    =======================================================*/
-function BackToTop() {
+const BackToTop = React.memo(function BackToTop() {
   const [show, setShow] = React.useState(false);
   const scrollTo = useSmoothScroll();
+  
   React.useEffect(() => {
-    const onScroll = () => setShow((window.scrollY || 0) > 600);
+    let ticking = false;
+    const onScroll = () => {
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          setShow((window.scrollY || 0) > 600);
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+  
   if (!show) return null;
+  
   return (
     <button
       onClick={() => scrollTo("home")}
       aria-label="Back to top"
-      className="fixed bottom-6 right-6 z-30 rounded-full bg-white text-black shadow-lg hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 w-12 h-12 grid place-items-center"
+      className="fixed bottom-6 right-6 z-30 rounded-full bg-white text-black shadow-lg hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 w-12 h-12 grid place-items-center transform-gpu"
     >
       ↑
     </button>
   );
-}
+});
 
 /* =========================================================
-   Floating CTA Dock
+   Floating CTA Dock (memoized)
    =======================================================*/
-function CTADock({ onQuote }: { onQuote: () => void }) {
+const CTADock = React.memo(function CTADock({ onQuote }: { onQuote: () => void }) {
   return (
-  <div className="fixed bottom-4 right-4 z-20 hidden sm:flex items-center gap-1.5 p-1.5 rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm">
+    <div className="fixed bottom-4 right-4 z-20 hidden sm:flex items-center gap-1.5 p-1.5 rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm">
       <button
         onClick={onQuote}
-    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black text-sm font-medium hover:opacity-90"
+        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black text-sm font-medium hover:opacity-90 transform-gpu"
       >
-    <Mail className="w-3.5 h-3.5" /> Get a quote
+        <Mail className="w-3.5 h-3.5" /> Get a quote
       </button>
       <a
         href="tel:+21612345678"
-    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 text-sm"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 text-sm transform-gpu"
       >
-    <Phone className="w-3.5 h-3.5" /> Call
+        <Phone className="w-3.5 h-3.5" /> Call
       </a>
       <a
         href="mailto:hello@starwaves.tn"
-    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 text-sm"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 text-sm transform-gpu"
       >
-    <Send className="w-3.5 h-3.5" /> Email
+        <Send className="w-3.5 h-3.5" /> Email
       </a>
     </div>
   );
-}
+});
 
 /* =========================================================
-   Process Timeline
+   Process Timeline (memoized)
    =======================================================*/
-function StepCard({ title, desc, index }: { title: string; desc: string; index: number }) {
+const StepCard = React.memo(function StepCard({ title, desc, index }: { title: string; desc: string; index: number }) {
   return (
     <div className="relative group">
       <GradientRing />
-      <div className="relative rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
+      <div className="relative rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm transform-gpu">
         <div className="flex items-start gap-4">
           <div className="shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-[#6CA4FF]/80 to-[#BA89FF]/80 text-black font-semibold grid place-items-center">
             <span className="text-black">{index}</span>
@@ -559,16 +672,17 @@ function StepCard({ title, desc, index }: { title: string; desc: string; index: 
       </div>
     </div>
   );
-}
+});
 
-function ProcessSection() {
-  const steps = [
+const ProcessSection = React.memo(function ProcessSection() {
+  const steps = React.useMemo(() => [
     { title: "Discovery", desc: "Objectives, stakeholders, constraints, and KPIs." },
     { title: "Design", desc: "Experience mapping, scenography, media plan, and budgets." },
     { title: "Pre‑production", desc: "Vendors, CADs, run‑of‑show, logistics & risk playbooks." },
     { title: "Onsite ops", desc: "Hotel desk, stage & AV, transport, and branding install." },
     { title: "Wrap & report", desc: "Strike, reconciliation, and post‑event media delivery." },
-  ];
+  ], []);
+
   return (
     <Section id="process">
       <Reveal>
@@ -586,32 +700,33 @@ function ProcessSection() {
       </div>
     </Section>
   );
-}
+});
 
 /* =========================================================
-   Testimonials
+   Testimonials (memoized)
    =======================================================*/
-function TestimonialCard({ quote, author, role }: { quote: string; author: string; role: string }) {
+const TestimonialCard = React.memo(function TestimonialCard({ quote, author, role }: { quote: string; author: string; role: string }) {
   return (
     <div className="relative group">
       <GradientRing />
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
+      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm transform-gpu">
         <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(500px circle at 20% 0%, rgba(255,255,255,0.06), transparent 60%)" }} />
         <div className="relative">
-          <div className="text-white/90 italic">“{quote}”</div>
+          <div className="text-white/90 italic">"{quote}"</div>
           <div className="mt-4 text-sm text-white/70">{author} — {role}</div>
         </div>
       </div>
     </div>
   );
-}
+});
 
-function Testimonials() {
-  const items = [
+const Testimonials = React.memo(function Testimonials() {
+  const items = React.useMemo(() => [
     { quote: "Flawless operations and a creative team we could trust.", author: "Chapter Chair", role: "Medical Society" },
     { quote: "From venues to media, everything was coordinated and clear.", author: "Program Director", role: "Gov Forum" },
     { quote: "Attendees loved the production value and pace.", author: "Event Manager", role: "Expo" },
-  ];
+  ], []);
+
   return (
     <Section id="testimonials">
       <Reveal>
@@ -627,38 +742,39 @@ function Testimonials() {
       </div>
     </Section>
   );
-}
+});
 
 /* =========================================================
-   FAQ (Accordion)
+   FAQ (Accordion) (memoized)
    =======================================================*/
-function FAQItem({ q, a }: { q: string; a: string }) {
+const FAQItem = React.memo(function FAQItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = React.useState(false);
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5">
+    <div className="rounded-xl border border-white/10 bg-white/5 transform-gpu">
       <button
-        className="w-full flex items-center justify-between gap-4 px-4 py-3 text-left hover:bg-white/5 rounded-xl"
+        className="w-full flex items-center justify-between gap-4 px-4 py-3 text-left hover:bg-white/5 rounded-xl transition-colors"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
         <span className="font-medium">{q}</span>
-        <span className={`transition-transform ${open ? "rotate-90" : ""}`}>›</span>
+        <span className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>›</span>
       </button>
       {open && (
         <div className="px-4 pb-4 text-white/80 text-sm">{a}</div>
       )}
     </div>
   );
-}
+});
 
-function FAQ() {
-  const faqs = [
+const FAQ = React.memo(function FAQ() {
+  const faqs = React.useMemo(() => [
     { q: "How fast can you quote?", a: "Typically within 48 hours with at least one venue option and draft budget." },
     { q: "Do you work outside Tunisia?", a: "Yes, via partner networks; brokerage and media remain in-house." },
     { q: "Minimum event size?", a: "We tailor to scope; from 150 pax breakouts to 2,000+ plenaries." },
     { q: "Do you support hybrid/streaming?", a: "Yes — multi-cam, hybrid stages, and multilingual streaming." },
     { q: "Can you handle branding & expo booths?", a: "Full print ecosystem, wayfinding, lanyards, booths, and overnight installs." },
-  ];
+  ], []);
+
   return (
     <Section id="faq">
       <Reveal>
@@ -672,12 +788,12 @@ function FAQ() {
       </div>
     </Section>
   );
-}
+});
 
 /* =========================================================
-   Gradient Ring (hover)
+   Gradient Ring (hover) (memoized)
    =======================================================*/
-function GradientRing() {
+const GradientRing = React.memo(function GradientRing() {
   return (
     <span
       data-test="grad-ring"
@@ -686,20 +802,19 @@ function GradientRing() {
       style={{
         background: "linear-gradient(90deg, #6CA4FF, #BA89FF, #FFA85E)",
         padding: "1px",
-        WebkitMask:
-          "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
+        WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
         WebkitMaskComposite: "xor",
         maskComposite: "exclude",
         borderRadius: "1rem",
       }}
     />
   );
-}
+});
 
 /* =========================================================
-   Nav
+   Nav (optimized)
    =======================================================*/
-function Nav() {
+const Nav = React.memo(function Nav() {
   const scrollTo = useSmoothScroll();
   const active = useActiveSection([
     "home",
@@ -711,18 +826,18 @@ function Nav() {
   ]);
   const [open, setOpen] = React.useState(false);
 
-  const link = (id: string) => (e?: React.MouseEvent) => {
+  const link = React.useCallback((id: string) => (e?: React.MouseEvent) => {
     if (e) e.preventDefault();
     setOpen(false);
     scrollTo(id);
-  };
+  }, [scrollTo]);
 
-  const linkClass = (id: string) =>
-    `hover:text-white relative ${
+  const linkClass = React.useCallback((id: string) =>
+    `hover:text-white relative transition-colors ${
       active === id
         ? "text-white after:content-[''] after:absolute after:-bottom-1 after:left-0 after:h-[2px] after:w-full after:bg-white/70"
         : "text-white/80"
-    }`;
+    }`, [active]);
 
   return (
     <>
@@ -746,35 +861,19 @@ function Nav() {
             <a href="#home" onClick={link("home")} className={linkClass("home")}>
               Home
             </a>
-            <a
-              href="#services"
-              onClick={link("services")}
-              className={linkClass("services")}
-            >
+            <a href="#services" onClick={link("services")} className={linkClass("services")}>
               Services
             </a>
-            <a
-              href="#partners"
-              onClick={link("partners")}
-              className={linkClass("partners")}
-            >
+            <a href="#partners" onClick={link("partners")} className={linkClass("partners")}>
               Partners
             </a>
             <a href="#work" onClick={link("work")} className={linkClass("work")}>
               Work
             </a>
-            <a
-              href="#about"
-              onClick={link("about")}
-              className={linkClass("about")}
-            >
+            <a href="#about" onClick={link("about")} className={linkClass("about")}>
               About
             </a>
-            <a
-              href="#contact"
-              onClick={link("contact")}
-              className={linkClass("contact")}
-            >
+            <a href="#contact" onClick={link("contact")} className={linkClass("contact")}>
               Contact
             </a>
           </nav>
@@ -806,38 +905,22 @@ function Nav() {
               </button>
             </div>
             <nav className="flex flex-col text-lg space-y-4 text-white/90">
-              <a href="#home" onClick={link("home")} className="hover:text-white">
+              <a href="#home" onClick={link("home")} className="hover:text-white transition-colors">
                 Home
               </a>
-              <a
-                href="#services"
-                onClick={link("services")}
-                className="hover:text-white"
-              >
+              <a href="#services" onClick={link("services")} className="hover:text-white transition-colors">
                 Services
               </a>
-              <a
-                href="#partners"
-                onClick={link("partners")}
-                className="hover:text-white"
-              >
+              <a href="#partners" onClick={link("partners")} className="hover:text-white transition-colors">
                 Partners
               </a>
-              <a href="#work" onClick={link("work")} className="hover:text-white">
+              <a href="#work" onClick={link("work")} className="hover:text-white transition-colors">
                 Work
               </a>
-              <a
-                href="#about"
-                onClick={link("about")}
-                className="hover:text-white"
-              >
+              <a href="#about" onClick={link("about")} className="hover:text-white transition-colors">
                 About
               </a>
-              <a
-                href="#contact"
-                onClick={link("contact")}
-                className="hover:text-white"
-              >
+              <a href="#contact" onClick={link("contact")} className="hover:text-white transition-colors">
                 Contact
               </a>
             </nav>
@@ -846,12 +929,12 @@ function Nav() {
       )}
     </>
   );
-}
+});
 
 /* =========================================================
-   Cards
+   Cards (memoized)
    =======================================================*/
-function ServiceCard({
+const ServiceCard = React.memo(function ServiceCard({
   title,
   desc,
   points,
@@ -865,7 +948,7 @@ function ServiceCard({
   return (
     <div className="relative group" data-test="service-card">
       <GradientRing />
-      <div className="relative rounded-2xl border border-white/10 bg-white/5 p-6 sm:p-7 md:p-8 backdrop-blur-sm transition hover:shadow-[0_0_40px_0_rgba(186,137,255,0.12)]">
+      <div className="relative rounded-2xl border border-white/10 bg-white/5 p-6 sm:p-7 md:p-8 backdrop-blur-sm transition-shadow hover:shadow-[0_0_40px_0_rgba(186,137,255,0.12)] transform-gpu">
         <div className="flex items-start gap-4">
           <div className="shrink-0 rounded-xl border border-white/10 bg-white/10 p-2">
             <Icon className="w-6 h-6 text-white/90" />
@@ -888,9 +971,9 @@ function ServiceCard({
       </div>
     </div>
   );
-}
+});
 
-function WorkCard({
+const WorkCard = React.memo(function WorkCard({
   title,
   role,
   tags = [],
@@ -905,21 +988,21 @@ function WorkCard({
       <GradientRing />
       <div
         ref={tiltRef}
-        className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 to-white/0 p-6 sm:p-7 md:p-8 backdrop-blur-[2px] hover:from-white/10 transition will-change-transform"
+        className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 to-white/0 p-6 sm:p-7 md:p-8 backdrop-blur-[2px] hover:from-white/10 transition-colors will-change-transform transform-gpu"
       >
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 rounded-2xl"
           style={{
-            background:
-              "radial-gradient(400px circle at var(--mx,50%) var(--my,50%), rgba(255,255,255,0.08), rgba(186,137,255,0.06) 25%, transparent 60%)",
+            background: "radial-gradient(400px circle at var(--mx,50%) var(--my,50%), rgba(255,255,255,0.08), rgba(186,137,255,0.06) 25%, transparent 60%)",
             mixBlendMode: "overlay",
           }}
         />
-<div
-  aria-hidden
-  className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(255,255,255,0.06),transparent_60%)]"
-/>        <div className="relative">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(255,255,255,0.06),transparent_60%)]"
+        />
+        <div className="relative">
           <div className="text-sm text-white/70">{role}</div>
           <div className="text-xl sm:text-2xl font-semibold">{title}</div>
           {tags.length ? (
@@ -938,14 +1021,12 @@ function WorkCard({
       </div>
     </div>
   );
-}
-
- 
+});
 
 /* =========================================================
-   Reveal
+   Reveal (optimized)
    =======================================================*/
-function Reveal({
+const Reveal = React.memo(function Reveal({
   children,
   delay = 0,
   className = "",
@@ -956,7 +1037,11 @@ function Reveal({
 }) {
   const ref = React.useRef<HTMLDivElement | null>(null);
   const [inView, setInView] = React.useState(false);
+  
   React.useEffect(() => {
+    const current = ref.current;
+    if (!current) return;
+    
     const io = new IntersectionObserver(
       (entries) => {
         entries.forEach((e) => {
@@ -968,82 +1053,99 @@ function Reveal({
       },
       { threshold: 0.18 }
     );
-    if (ref.current) io.observe(ref.current);
+    
+    io.observe(current);
     return () => io.disconnect();
   }, []);
+  
   return (
     <div
       ref={ref}
       style={{ transitionDelay: `${delay}ms` }}
-      className={`opacity-0 translate-y-6 scale-[.98] will-change-transform transition duration-700 ease-out ${
+      className={`opacity-0 translate-y-6 scale-[.98] will-change-transform transition duration-700 ease-out transform-gpu ${
         inView ? "opacity-100 translate-y-0 scale-100" : ""
       } ${className}`}
     >
       {children}
     </div>
   );
-}
+});
 
 /* =========================================================
-   Extras
+   Extras (optimized)
    =======================================================*/
-function ScrollProgressBar({ show = true }: { show?: boolean }) {
+const ScrollProgressBar = React.memo(function ScrollProgressBar({ show = true }: { show?: boolean }) {
   const ref = React.useRef<HTMLDivElement | null>(null);
+  
   React.useEffect(() => {
     if (!show) return;
+    
     const el = ref.current!;
+    let ticking = false;
+    
     const onScroll = () => {
-      const max = document.body.scrollHeight - window.innerHeight;
-      const p = Math.max(
-        0,
-        Math.min(1, (window.scrollY || 0) / Math.max(1, max))
-      );
-      if (el) el.style.transform = `scaleX(${p})`;
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          const max = document.body.scrollHeight - window.innerHeight;
+          const p = Math.max(0, Math.min(1, (window.scrollY || 0) / Math.max(1, max)));
+          if (el) el.style.transform = `scaleX(${p})`;
+          ticking = false;
+        });
+        ticking = true;
+      }
     };
+    
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, [show]);
+  
   if (!show) return null;
+  
   return (
     <div className="fixed top-0 left-0 right-0 z-[30] h-[3px] bg-transparent">
       <div
         ref={ref}
-        className="origin-left h-full bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] scale-x-0 transition-transform duration-75"
+        className="origin-left h-full bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] scale-x-0 transition-transform duration-75 transform-gpu"
       />
     </div>
   );
-}
+});
 
-function CountUp({ to, label }: { to: number; label: string }) {
+const CountUp = React.memo(function CountUp({ to, label }: { to: number; label: string }) {
   const ref = React.useRef<HTMLDivElement | null>(null);
   const [val, setVal] = React.useState(0);
+  
   React.useEffect(() => {
+    const current = ref.current;
+    if (!current) return;
+    
     const obs = new IntersectionObserver(
       ([e]) => {
         if (!e.isIntersecting) return;
         obs.disconnect();
-        const start = performance.now(),
-          dur = 1200,
-          from = 0;
+        const start = performance.now();
+        const dur = 1200;
+        const from = 0;
+        
         const tick = (t: number) => {
           const p = Math.min(1, (t - start) / dur);
-          setVal(
-            Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3)))
-          );
+          setVal(Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3))));
           if (p < 1) requestAnimationFrame(tick);
         };
         requestAnimationFrame(tick);
       },
       { threshold: 0.4 }
     );
-    if (ref.current) obs.observe(ref.current);
+    
+    obs.observe(current);
     return () => obs.disconnect();
   }, [to]);
+  
   return (
     <div
       ref={ref}
-      className="rounded-2xl border border-white/10 px-4 sm:px-5 py-4 bg-white/5 backdrop-blur-sm text-center"
+      className="rounded-2xl border border-white/10 px-4 sm:px-5 py-4 bg-white/5 backdrop-blur-sm text-center transform-gpu"
     >
       <div className="text-2xl sm:text-3xl font-semibold">
         {val.toLocaleString()}
@@ -1051,29 +1153,34 @@ function CountUp({ to, label }: { to: number; label: string }) {
       <div className="text-white/70 text-xs sm:text-sm">{label}</div>
     </div>
   );
-}
+});
 
 /* =========================================================
-   Unlock FX
+   Unlock FX (optimized)
    =======================================================*/
-function UnlockFX({ trigger }: { trigger: number }) {
+const UnlockFX = React.memo(function UnlockFX({ trigger }: { trigger: number }) {
   const [active, setActive] = React.useState(false);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
   React.useEffect(() => {
     if (!trigger) return;
-  setActive(true);
-  const c = canvasRef.current;
-  if (!c) return;
-  const ctx = c.getContext("2d");
-  if (!ctx) return;
-  let w = (c.width = window.innerWidth * 2);
-  let h = (c.height = window.innerHeight * 2);
+    
+    setActive(true);
+    const c = canvasRef.current;
+    if (!c) return;
+    
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    
+  const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+  let w = (c.width = Math.floor(window.innerWidth * dpr));
+  let h = (c.height = Math.floor(window.innerHeight * dpr));
   c.style.width = window.innerWidth + "px";
   c.style.height = window.innerHeight + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // Premium magical burst: fewer, high-quality glowing particles and sparkles
-    const particles = Array.from({ length: 60 }, () => {
+  const isFine = window.matchMedia && window.matchMedia("(pointer: fine)").matches;
+  const particles = Array.from({ length: isFine ? 60 : 40 }, () => {
       const ang = Math.random() * Math.PI * 2;
       const spd = 18 + Math.random() * 22;
       return {
@@ -1087,8 +1194,7 @@ function UnlockFX({ trigger }: { trigger: number }) {
       };
     });
 
-    // Sparkles
-    const sparkles = Array.from({ length: 18 }, () => {
+  const sparkles = Array.from({ length: isFine ? 18 : 12 }, () => {
       const ang = Math.random() * Math.PI * 2;
       const spd = 30 + Math.random() * 40;
       return {
@@ -1105,6 +1211,7 @@ function UnlockFX({ trigger }: { trigger: number }) {
     const tick = () => {
       ctx.clearRect(0, 0, w, h);
       ctx.globalCompositeOperation = "lighter";
+      
       // Draw multi-layered aurora burst
       for (let i = 0; i < 3; i++) {
         ctx.save();
@@ -1116,6 +1223,7 @@ function UnlockFX({ trigger }: { trigger: number }) {
         ctx.fill();
         ctx.restore();
       }
+      
       // Draw glowing particles
       for (const p of particles) {
         p.x += p.vx;
@@ -1133,6 +1241,7 @@ function UnlockFX({ trigger }: { trigger: number }) {
         ctx.fill();
         ctx.restore();
       }
+      
       // Draw sparkles
       for (const s of sparkles) {
         s.x += s.vx;
@@ -1152,6 +1261,7 @@ function UnlockFX({ trigger }: { trigger: number }) {
         ctx.fill();
         ctx.restore();
       }
+      
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -1168,13 +1278,13 @@ function UnlockFX({ trigger }: { trigger: number }) {
   }, [trigger]);
 
   if (!active) return null;
+  
   return (
     <div className="fixed inset-0 z-[35] pointer-events-none">
       <div
         className="absolute inset-0"
         style={{
-          background:
-            "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.45), rgba(186,137,255,0.22) 30%, rgba(255,168,94,0.12) 50%, rgba(255,255,255,0) 80%)",
+          background: "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.45), rgba(186,137,255,0.22) 30%, rgba(255,168,94,0.12) 50%, rgba(255,255,255,0) 80%)",
           animation: "flashFade 1400ms ease-out forwards",
         }}
       />
@@ -1190,7 +1300,6 @@ function UnlockFX({ trigger }: { trigger: number }) {
           filter: "blur(0.5px) brightness(1.2)",
         }}
       >
-        {/* Sparkles around the ring with staggered, smooth fade */}
         {[...Array(12)].map((_, i) => (
           <div
             key={i}
@@ -1224,12 +1333,12 @@ function UnlockFX({ trigger }: { trigger: number }) {
       `}</style>
     </div>
   );
-}
+});
 
 /* =========================================================
-   Contact Form (same polished UX)
+   Contact Form (optimized)
    =======================================================*/
-function ContactForm() {
+const ContactForm = React.memo(function ContactForm() {
   type FormState = {
     name: string;
     email: string;
@@ -1243,9 +1352,8 @@ function ContactForm() {
     message: string;
     honey: string;
   };
-  const ids = React.useMemo(() => {
-  // Stable IDs for inputs so React never swaps them out
-  return {
+
+  const ids = React.useMemo(() => ({
     name: "cf_name",
     email: "cf_email",
     phone: "cf_phone",
@@ -1256,9 +1364,7 @@ function ContactForm() {
     budget: "cf_budget",
     av: "cf_av",
     message: "cf_message",
-  } as const;
-}, []);
-
+  } as const), []);
 
   const [form, setForm] = React.useState<FormState>({
     name: "",
@@ -1274,9 +1380,7 @@ function ContactForm() {
     honey: "",
   });
 
-  const [touched, setTouched] = React.useState<
-    Record<keyof FormState, boolean>
-  >({
+  const [touched, setTouched] = React.useState<Record<keyof FormState, boolean>>({
     name: false,
     email: false,
     phone: false,
@@ -1290,88 +1394,58 @@ function ContactForm() {
     honey: false,
   });
 
-  const [status, setStatus] =
-    React.useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [status, setStatus] = React.useState<"idle" | "sending" | "sent" | "error">("idle");
   const [globalMsg, setGlobalMsg] = React.useState<string>("");
 
-  const validEmail = (v: string) => /[^@\s]+@[^@\s]+\.[^@\s]+/.test(v.trim());
-  const required = (v: string) => v.trim().length > 0;
+  const validEmail = React.useCallback((v: string) => /[^@\s]+@[^@\s]+\.[^@\s]+/.test(v.trim()), []);
+  const required = React.useCallback((v: string) => v.trim().length > 0, []);
 
-  const formatTN = (v: string) => {
+  const formatTN = React.useCallback((v: string) => {
     const digits = v.replace(/\D/g, "").slice(0, 12);
     if (digits.startsWith("216")) {
       const rest = digits.slice(3);
-      return (
-        "+216 " +
-        rest.replace(
-          /(\d{2})(\d{3})(\d{3})?/,
-          (_m, a, b, c) => [a, b, c].filter(Boolean).join(" ")
-        )
-      );
+      return "+216 " + rest.replace(/(\d{2})(\d{3})(\d{3})?/, (_m, a, b, c) => [a, b, c].filter(Boolean).join(" "));
     }
     if (digits.startsWith("00216")) {
       const rest = digits.slice(5);
-      return (
-        "+216 " +
-        rest.replace(
-          /(\d{2})(\d{3})(\d{3})?/,
-          (_m, a, b, c) => [a, b, c].filter(Boolean).join(" ")
-        )
-      );
+      return "+216 " + rest.replace(/(\d{2})(\d{3})(\d{3})?/, (_m, a, b, c) => [a, b, c].filter(Boolean).join(" "));
     }
     if (v.startsWith("+")) return "+" + digits;
     return digits;
-  };
+  }, []);
 
-  const onField =
-    <K extends keyof FormState>(k: K) =>
+  const onField = React.useCallback(<K extends keyof FormState>(k: K) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      const raw =
-        (e.currentTarget &&
-          (e.currentTarget as HTMLInputElement | HTMLTextAreaElement).value) ??
-        ((e.target as HTMLInputElement | HTMLTextAreaElement | null)?.value ??
-          "");
+      const raw = e.target.value ?? "";
       const v = k === "phone" ? formatTN(raw) : raw;
       setForm((s) => ({ ...s, [k]: v }));
-    };
+    }, [formatTN]);
 
-  const onBlur = <K extends keyof FormState>(k: K) => () =>
-    setTouched((t) => ({ ...t, [k]: true }));
+  const onBlur = React.useCallback(<K extends keyof FormState>(k: K) => () =>
+    setTouched((t) => ({ ...t, [k]: true })), []);
 
-  const errorFor = (k: keyof FormState): string | null => {
-    if (k === "name" && touched.name && !required(form.name))
-      return "Name is required";
-    if (k === "email" && touched.email && !validEmail(form.email))
-      return "Enter a valid email";
-    if (k === "message" && touched.message && !required(form.message))
-      return "Tell us a few details";
+  const errorFor = React.useCallback((k: keyof FormState): string | null => {
+    if (k === "name" && touched.name && !required(form.name)) return "Name is required";
+    if (k === "email" && touched.email && !validEmail(form.email)) return "Enter a valid email";
+    if (k === "message" && touched.message && !required(form.message)) return "Tell us a few details";
     return null;
-  };
+  }, [touched, form, required, validEmail]);
 
-  const hasError = (k: keyof FormState) => Boolean(errorFor(k));
-  const isOK = (k: keyof FormState) =>
-    touched[k] && !hasError(k) && required((form[k] as string) ?? "");
+  const hasError = React.useCallback((k: keyof FormState) => Boolean(errorFor(k)), [errorFor]);
+  const isOK = React.useCallback((k: keyof FormState) =>
+    touched[k] && !hasError(k) && required((form[k] as string) ?? ""), [touched, hasError, required, form]);
 
   const leftChars = 1200 - form.message.length;
   const messageTooLong = form.message.length > 1200;
 
-  const onSubmit = async (e: React.FormEvent) => {
+  const onSubmit = React.useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched((t) => ({ ...t, name: true, email: true, message: true }));
     if (form.honey) return;
 
-    if (
-      !required(form.name) ||
-      !validEmail(form.email) ||
-      !required(form.message) ||
-      messageTooLong
-    ) {
+    if (!required(form.name) || !validEmail(form.email) || !required(form.message) || messageTooLong) {
       setStatus("error");
-      setGlobalMsg(
-        messageTooLong
-          ? "Your message is a bit long — please shorten it."
-          : "Please fix the highlighted fields."
-      );
+      setGlobalMsg(messageTooLong ? "Your message is a bit long — please shorten it." : "Please fix the highlighted fields.");
       return;
     }
 
@@ -1382,43 +1456,21 @@ function ContactForm() {
       const res = await fetch("/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          _timestamp: new Date().toISOString(),
-        }),
+        body: JSON.stringify({ ...form, _timestamp: new Date().toISOString() }),
       });
       if (!res.ok) throw new Error("bad status");
       setStatus("sent");
-      setGlobalMsg(
-        "Thanks! We’ll reply within 48h with a venue short-list & draft budget."
-      );
+      setGlobalMsg("Thanks! We'll reply within 48h with a venue short-list & draft budget.");
     } catch {
-      const subject = encodeURIComponent(
-        `Event inquiry from ${form.name} — ${form.city || ""}`
-      );
-      const body = encodeURIComponent(
-        `Name: ${form.name}
-Email: ${form.email}
-Phone: ${form.phone}
-City: ${form.city}
-Dates: ${form.dates}
-Headcount: ${form.headcount}
-Rooms/night: ${form.rooms}
-Budget: ${form.budget}
-AV: ${form.av}
-
-Message:
-${form.message}
-
-Sent via starwaves.tn`
-      );
+      const subject = encodeURIComponent(`Event inquiry from ${form.name} — ${form.city || ""}`);
+      const body = encodeURIComponent(`Name: ${form.name}\nEmail: ${form.email}\nPhone: ${form.phone}\nCity: ${form.city}\nDates: ${form.dates}\nHeadcount: ${form.headcount}\nRooms/night: ${form.rooms}\nBudget: ${form.budget}\nAV: ${form.av}\n\nMessage:\n${form.message}\n\nSent via starwaves.tn`);
       window.location.href = `mailto:hello@starwaves.tn?subject=${subject}&body=${body}`;
       setStatus("sent");
       setGlobalMsg("Thanks! Your email client should open with the details.");
     }
-  };
+  }, [form, required, validEmail, messageTooLong]);
 
-  const Field = ({
+  const Field = React.memo(function Field({
     label,
     name,
     requiredField,
@@ -1434,39 +1486,39 @@ Sent via starwaves.tn`
     ok?: boolean;
     error?: string | null;
     children: React.ReactNode;
-  }) => (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <label htmlFor={name} className="text-xs text-white/70">
-          {label}{" "}
-          {requiredField ? (
-            <span className="text-white/40">(required)</span>
-          ) : null}
-        </label>
-        <div className="h-5">
-          {ok ? (
-            <Check className="w-4 h-4 text-emerald-400" />
-          ) : error ? (
-            <XCircle className="w-4 h-4 text-rose-300" />
+  }) {
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label htmlFor={name} className="text-xs text-white/70">
+            {label}{" "}
+            {requiredField ? <span className="text-white/40">(required)</span> : null}
+          </label>
+          <div className="h-5">
+            {ok ? (
+              <Check className="w-4 h-4 text-emerald-400" />
+            ) : error ? (
+              <XCircle className="w-4 h-4 text-rose-300" />
+            ) : null}
+          </div>
+        </div>
+        {children}
+        <div className="min-h-[1rem] text-[11px] leading-4">
+          {error ? (
+            <span className="text-rose-300">{error}</span>
+          ) : hint ? (
+            <span className="text-white/50">{hint}</span>
           ) : null}
         </div>
       </div>
-      {children}
-      <div className="min-h-[1rem] text-[11px] leading-4">
-        {error ? (
-          <span className="text-rose-300">{error}</span>
-        ) : hint ? (
-          <span className="text-white/50">{hint}</span>
-        ) : null}
-      </div>
-    </div>
-  );
+    );
+  });
 
   return (
     <form
       id="contact-form"
       onSubmit={onSubmit}
-      className="relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-5 sm:p-6 md:p-8 text-left"
+      className="relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-5 sm:p-6 md:p-8 text-left transform-gpu"
       noValidate
     >
       <div className="sr-only" aria-live="polite">
@@ -1488,21 +1540,13 @@ Sent via starwaves.tn`
         <div className="absolute inset-0 z-10 grid place-items-center rounded-2xl bg-black/60 text-center p-8">
           <div>
             <div className="text-2xl font-semibold mb-2">Thank you!</div>
-            <p className="text-white/80">
-              {globalMsg || "We’ll be in touch shortly."}
-            </p>
+            <p className="text-white/80">{globalMsg || "We'll be in touch shortly."}</p>
           </div>
         </div>
       )}
 
       <div className="grid md:grid-cols-2 gap-5">
-        <Field
-          label="Name"
-          name="name"
-          requiredField
-          ok={isOK("name")}
-          error={errorFor("name")}
-        >
+        <Field label="Name" name="name" requiredField ok={isOK("name")} error={errorFor("name")}>
           <input
             id="name"
             name="name"
@@ -1511,18 +1555,12 @@ Sent via starwaves.tn`
             onChange={onField("name")}
             onBlur={onBlur("name")}
             placeholder="Your full name"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
             autoComplete="name"
           />
         </Field>
 
-        <Field
-          label="Email"
-          name="email"
-          requiredField
-          ok={isOK("email") && validEmail(form.email)}
-          error={errorFor("email")}
-        >
+        <Field label="Email" name="email" requiredField ok={isOK("email") && validEmail(form.email)} error={errorFor("email")}>
           <input
             id="email"
             name="email"
@@ -1532,7 +1570,7 @@ Sent via starwaves.tn`
             onChange={onField("email")}
             onBlur={onBlur("email")}
             placeholder="you@example.com"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
             autoComplete="email"
           />
         </Field>
@@ -1545,7 +1583,7 @@ Sent via starwaves.tn`
             onChange={onField("phone")}
             onBlur={onBlur("phone")}
             placeholder="+216 12 345 678"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
             autoComplete="tel"
             inputMode="tel"
           />
@@ -1559,7 +1597,7 @@ Sent via starwaves.tn`
             onChange={onField("city")}
             onBlur={onBlur("city")}
             placeholder="Tunis, Hammamet, Sousse..."
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
             autoComplete="address-level2"
           />
         </Field>
@@ -1572,7 +1610,7 @@ Sent via starwaves.tn`
             onChange={onField("dates")}
             onBlur={onBlur("dates")}
             placeholder="e.g., 12–14 Oct 2025"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
           />
         </Field>
 
@@ -1584,7 +1622,7 @@ Sent via starwaves.tn`
             onChange={onField("headcount")}
             onBlur={onBlur("headcount")}
             placeholder="e.g., 400"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
             inputMode="numeric"
           />
         </Field>
@@ -1597,7 +1635,7 @@ Sent via starwaves.tn`
             onChange={onField("rooms")}
             onBlur={onBlur("rooms")}
             placeholder="e.g., 120"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
             inputMode="numeric"
           />
         </Field>
@@ -1610,17 +1648,13 @@ Sent via starwaves.tn`
             onChange={onField("budget")}
             onBlur={onBlur("budget")}
             placeholder="e.g., 80,000 TND"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
             inputMode="numeric"
           />
         </Field>
 
         <div className="md:col-span-2">
-          <Field
-            label="AV / Stage needs"
-            name="av"
-            hint="LED / projection / streaming / translation…"
-          >
+          <Field label="AV / Stage needs" name="av" hint="LED / projection / streaming / translation…">
             <input
               id="av"
               name="av"
@@ -1628,7 +1662,7 @@ Sent via starwaves.tn`
               onChange={onField("av")}
               onBlur={onBlur("av")}
               placeholder="LED / projection / streaming / translation..."
-              className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+              className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
             />
           </Field>
         </div>
@@ -1656,7 +1690,7 @@ Sent via starwaves.tn`
               onBlur={onBlur("message")}
               rows={6}
               placeholder="Tell us about your congress..."
-              className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+              className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
               maxLength={1400}
             />
             <div className="mt-1 text-[11px] text-white/50 text-right">
@@ -1677,7 +1711,7 @@ Sent via starwaves.tn`
           type="submit"
           disabled={status === "sending"}
           aria-busy={status === "sending"}
-          className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 transform-gpu"
         >
           {status === "sending" ? (
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -1692,17 +1726,17 @@ Sent via starwaves.tn`
       </div>
     </form>
   );
-}
+});
 
 /* =========================================================
-   Footer
+   Footer (memoized)
    =======================================================*/
-function Footer() {
+const Footer = React.memo(function Footer() {
   const scrollTo = useSmoothScroll();
-  const go = (id: string) => (e: React.MouseEvent) => {
+  const go = React.useCallback((id: string) => (e: React.MouseEvent) => {
     e.preventDefault();
     scrollTo(id);
-  };
+  }, [scrollTo]);
 
   return (
     <footer id="footer" className="relative z-10 mt-16 border-t border-white/10">
@@ -1726,21 +1760,21 @@ function Footer() {
                 target="_blank"
                 rel="noreferrer"
                 aria-label="Facebook"
-                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors transform-gpu"
               >
                 <Facebook className="w-5 h-5" />
               </a>
               <a
                 href="#"
                 aria-label="Instagram"
-                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors transform-gpu"
               >
                 <Instagram className="w-5 h-5" />
               </a>
               <a
                 href="#"
                 aria-label="LinkedIn"
-                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors transform-gpu"
               >
                 <Linkedin className="w-5 h-5" />
               </a>
@@ -1751,38 +1785,22 @@ function Footer() {
             <h4 className="text-white font-semibold">About</h4>
             <ul className="mt-3 space-y-2 text-white/70 text-sm">
               <li>
-                <a
-                  href="#home"
-                  onClick={go("home")}
-                  className="hover:text-white"
-                >
+                <a href="#home" onClick={go("home")} className="hover:text-white transition-colors">
                   Home
                 </a>
               </li>
               <li>
-                <a
-                  href="#about"
-                  onClick={go("about")}
-                  className="hover:text-white"
-                >
+                <a href="#about" onClick={go("about")} className="hover:text-white transition-colors">
                   About
                 </a>
               </li>
               <li>
-                <a
-                  href="#work"
-                  onClick={go("work")}
-                  className="hover:text-white"
-                >
+                <a href="#work" onClick={go("work")} className="hover:text-white transition-colors">
                   Work
                 </a>
               </li>
               <li>
-                <a
-                  href="#contact"
-                  onClick={go("contact")}
-                  className="hover:text-white"
-                >
+                <a href="#contact" onClick={go("contact")} className="hover:text-white transition-colors">
                   Contact
                 </a>
               </li>
@@ -1793,56 +1811,32 @@ function Footer() {
             <h4 className="text-white font-semibold">Services</h4>
             <ul className="mt-3 space-y-2 text-white/70 text-sm">
               <li>
-                <a
-                  href="#services"
-                  onClick={go("services")}
-                  className="hover:text-white"
-                >
+                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
                   Hotel & Venue Brokerage
                 </a>
               </li>
               <li>
-                <a
-                  href="#services"
-                  onClick={go("services")}
-                  className="hover:text-white"
-                >
+                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
                   Production & AV
                 </a>
               </li>
               <li>
-                <a
-                  href="#services"
-                  onClick={go("services")}
-                  className="hover:text-white"
-                >
+                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
                   Print & Branding
                 </a>
               </li>
               <li>
-                <a
-                  href="#services"
-                  onClick={go("services")}
-                  className="hover:text-white"
-                >
+                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
                   Transport & Logistics
                 </a>
               </li>
               <li>
-                <a
-                  href="#services"
-                  onClick={go("services")}
-                  className="hover:text-white"
-                >
+                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
                   Media & Content
                 </a>
               </li>
               <li>
-                <a
-                  href="#services"
-                  onClick={go("services")}
-                  className="hover:text-white"
-                >
+                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
                   Experience Design
                 </a>
               </li>
@@ -1853,20 +1847,12 @@ function Footer() {
             <h4 className="text-white font-semibold">Support</h4>
             <ul className="mt-3 space-y-2 text-white/70 text-sm">
               <li>
-                <a
-                  href="#contact"
-                  onClick={go("contact")}
-                  className="hover:text-white"
-                >
+                <a href="#contact" onClick={go("contact")} className="hover:text-white transition-colors">
                   Get a quote
                 </a>
               </li>
               <li>
-                <a
-                  href="#contact"
-                  onClick={go("contact")}
-                  className="hover:text-white"
-                >
+                <a href="#contact" onClick={go("contact")} className="hover:text-white transition-colors">
                   Contact
                 </a>
               </li>
@@ -1885,7 +1871,7 @@ function Footer() {
             Capital 5,000 TND
           </div>
           <div className="flex items-center gap-6">
-            <a href="#home" onClick={go("home")} className="hover:text-white">
+            <a href="#home" onClick={go("home")} className="hover:text-white transition-colors">
               Back to top
             </a>
           </div>
@@ -1893,16 +1879,16 @@ function Footer() {
       </div>
     </footer>
   );
-}
+});
 
 /* =========================================================
    App
    =======================================================*/
-function AnimatedHeadline() {
+const AnimatedHeadline = React.memo(function AnimatedHeadline() {
   const phrases = React.useMemo(
     () => [
       "we create worlds",
-      "we shape experiences",
+      "we shape experiences", 
       "we stage congresses",
       "we craft stories",
     ],
@@ -1913,9 +1899,9 @@ function AnimatedHeadline() {
       <TypeCycle phrases={phrases} />
     </span>
   );
-}
+});
 
-function TypeCycle({
+const TypeCycle = React.memo(function TypeCycle({
   phrases,
   typingSpeed = 70,
   deletingSpeed = 45,
@@ -1931,6 +1917,7 @@ function TypeCycle({
   const [text, setText] = React.useState("");
   const [i, setI] = React.useState(0);
   const [del, setDel] = React.useState(false);
+  
   const longest = React.useMemo(
     () => phrases.reduce((m, p) => Math.max(m, p.length), 0),
     [phrases]
@@ -1946,10 +1933,7 @@ function TypeCycle({
 
     if (!del) {
       if (!done)
-        t = window.setTimeout(
-          () => setText(current.slice(0, text.length + 1)),
-          d(typingSpeed)
-        );
+        t = window.setTimeout(() => setText(current.slice(0, text.length + 1)), d(typingSpeed));
       else t = window.setTimeout(() => setDel(true), pause);
     } else {
       if (!empty)
@@ -1973,7 +1957,7 @@ function TypeCycle({
       <span className="ml-1 w-[2px] h-[1em] bg-white/80 animate-pulse" />
     </span>
   );
-}
+});
 
 export default function App() {
   const scrollTo = useSmoothScroll();
@@ -1983,7 +1967,7 @@ export default function App() {
   const [fxKey, setFxKey] = React.useState(0);
   const auroraRef = React.useRef<{ burst: () => void } | null>(null);
 
-  const runUnlock = (targetId: string) => {
+  const runUnlock = React.useCallback((targetId: string) => {
     if (unlocking) return;
     auroraRef.current?.burst?.();
     setFxKey((k) => k + 1);
@@ -1992,14 +1976,17 @@ export default function App() {
       setUnlocking(false);
       requestAnimationFrame(() => scrollTo(targetId));
     }, 900);
-  };
+  }, [unlocking, scrollTo]);
+
+  const onQuote = React.useCallback(() => runUnlock("contact"), [runUnlock]);
 
   return (
     <div className="relative min-h-screen text-white overflow-x-hidden bg-[#06070B]">
       <AuroraBackground ref={auroraRef} />
       <ScrollProgressBar />
       <Nav />
-  <CTADock onQuote={() => runUnlock("contact")} />
+      <CTADock onQuote={onQuote} />
+      
       <main className="relative z-10">
         {/* HERO */}
         <section
@@ -2007,11 +1994,10 @@ export default function App() {
           className="relative min-h-[calc(100vh-56px)] pt-14 md:pt-16 flex flex-col items-center justify-center text-center overflow-hidden"
         >
           <div className="absolute inset-x-0 top-14 z-[-1] h-40 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
-<div
-  aria-hidden
-  className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(255,255,255,0.06),transparent_60%)]"
-/>
-          
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(255,255,255,0.06),transparent_60%)]"
+          />
 
           <Container>
             <div className="mx-auto max-w-6xl">
@@ -2023,7 +2009,7 @@ export default function App() {
 
             <div className="mt-5">
               <h1 className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl font-semibold leading-[1.08] md:leading-[1.05] max-w-6xl mx-auto">
-                We don’t organize events,
+                We don't organize events,
                 <br className="hidden md:block" />
                 <AnimatedHeadline />
               </h1>
@@ -2036,14 +2022,14 @@ export default function App() {
                 <button
                   ref={mag1}
                   onClick={() => runUnlock("services")}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-white text-black font-semibold hover:opacity-90"
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-white text-black font-semibold hover:opacity-90 transform-gpu transition-opacity"
                 >
                   Explore services <ArrowRight className="w-4 h-4" />
                 </button>
                 <button
                   ref={mag2}
                   onClick={() => runUnlock("contact")}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90"
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90 transform-gpu transition-opacity"
                 >
                   Get a quote <Mail className="w-4 h-4" />
                 </button>
@@ -2157,10 +2143,8 @@ export default function App() {
             <div
               className="relative overflow-hidden group"
               style={{
-                WebkitMaskImage:
-                  "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
-                maskImage:
-                  "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
+                WebkitMaskImage: "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
+                maskImage: "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
               }}
             >
               <div className="flex gap-16 items-center animate-[marq_35s_linear_infinite] group-hover:[animation-play-state:paused]">
@@ -2240,17 +2224,17 @@ export default function App() {
           </div>
         </Section>
 
-  {/* PROCESS */}
-  <ProcessSection />
+        {/* PROCESS */}
+        <ProcessSection />
 
-  {/* TESTIMONIALS */}
-  <Testimonials />
+        {/* TESTIMONIALS */}
+        <Testimonials />
 
         {/* ABOUT */}
         <Section id="about">
           <div className="grid lg:grid-cols-2 gap-8">
             <Reveal>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-8">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-8 transform-gpu">
                 <h3 className="text-xl font-semibold">Why Starwaves</h3>
                 <p className="mt-3 text-white/80">
                   We run congresses like productions: one schedule, one budget,
@@ -2276,7 +2260,7 @@ export default function App() {
             </Reveal>
 
             <Reveal delay={80}>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-8">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-8 transform-gpu">
                 <h3 className="text-xl font-semibold">At a glance</h3>
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4">
@@ -2301,20 +2285,23 @@ export default function App() {
           </div>
         </Section>
 
+        {/* FAQ */}
+        <FAQ />
+
         {/* CONTACT */}
         <Section id="contact">
           <Reveal>
             <div className="grid lg:grid-cols-3 gap-8">
               <div className="lg:col-span-1 space-y-5">
                 <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold">
-                  Let’s plan your next congress
+                  Let's plan your next congress
                 </h2>
                 <p className="text-white/80">
-                  Tell us dates, city, headcount, and anything special. We’ll
+                  Tell us dates, city, headcount, and anything special. We'll
                   reply with a venue short-list and draft budget.
                 </p>
 
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 transform-gpu">
                   <div className="flex items-center gap-2 text-white/80">
                     <Phone className="w-4 h-4" /> +216 12 345 678
                   </div>
@@ -2336,7 +2323,7 @@ export default function App() {
       </main>
 
       <Footer />
-  <BackToTop />
+      <BackToTop />
 
       {/* FX */}
       {unlocking && <UnlockFX trigger={fxKey} />}
