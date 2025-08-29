@@ -1,3 +1,4 @@
+// Decorative background orbs for section visuals
 import React from "react";
 import {
   ArrowRight,
@@ -25,52 +26,22 @@ import {
 import "./index.css";
 
 /* =========================================================
-   Performance Monitor
+   Aurora Canvas Background (optimized for performance)
    =======================================================*/
-const usePerformanceMonitor = () => {
-  const [quality, setQuality] = React.useState(1);
-  const frameTimesRef = React.useRef<number[]>([]);
-  const lastFrameRef = React.useRef(0);
-
-  const recordFrame = React.useCallback(() => {
-    const now = performance.now();
-    if (lastFrameRef.current) {
-      const frameTime = now - lastFrameRef.current;
-      frameTimesRef.current.push(frameTime);
-      
-      // Keep only last 60 frames
-      if (frameTimesRef.current.length > 60) {
-        frameTimesRef.current.shift();
-      }
-      
-      // Adjust quality every 30 frames
-      if (frameTimesRef.current.length >= 30 && frameTimesRef.current.length % 30 === 0) {
-        const avgFrameTime = frameTimesRef.current.reduce((a, b) => a + b, 0) / frameTimesRef.current.length;
-        const fps = 1000 / avgFrameTime;
-        
-        if (fps < 45 && quality > 0.5) {
-          setQuality(prev => Math.max(0.5, prev - 0.1));
-        } else if (fps > 55 && quality < 1) {
-          setQuality(prev => Math.min(1, prev + 0.05));
-        }
-      }
-    }
-    lastFrameRef.current = now;
-  }, [quality]);
-
-  return { quality, recordFrame };
-};
-
-/* =========================================================
-   Aurora Canvas Background (optimized)
-   =======================================================*/
-const AuroraBackground = React.memo(React.forwardRef<{ burst: () => void }>(function AuroraBackground(_, ref) {
+const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const scrollRef = React.useRef(0);
   const rafRef = React.useRef<number | null>(null);
   const burstRef = React.useRef(0);
-  const lastFrameRef = React.useRef(0);
-  const { quality, recordFrame } = usePerformanceMonitor();
+  const lastFrameTime = React.useRef(0);
+  const performanceLevel = React.useRef(1); // 0.5, 1, or 2
+  const lastPerfSample = React.useRef(0);
+  const perfSamples: number[] = [];
+  let adjustCooldown = 0; // frames to wait before next perf adjustment
+  const lastScrollY = React.useRef(0);
+  const lastScrollT = React.useRef(0);
+  const fastScrollUntil = React.useRef(0);
+  const fastScrollRef = React.useRef(false);
 
   React.useImperativeHandle(ref, () => ({
     burst: () => {
@@ -89,59 +60,130 @@ const AuroraBackground = React.memo(React.forwardRef<{ burst: () => void }>(func
   React.useEffect(() => {
     const c = canvasRef.current!;
     const ctx = c.getContext("2d")!;
-    let w = 0, h = 0, dpr = Math.min(2, window.devicePixelRatio || 1);
+    let w = 0, h = 0, dpr = 1;
 
-    let stars: { x: number; y: number; r: number; z: number; p: number }[] = [];
-
+    // Performance detection
     const isCoarse = window.matchMedia && !window.matchMedia("(pointer: fine)").matches;
-    const prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const isMobile = window.innerWidth < 768;
+    const isLowEnd = navigator.hardwareConcurrency <= 4 || isMobile;
+    
+    // Set performance level
+    if (isLowEnd) performanceLevel.current = 0.5;
+    else if (isMobile) performanceLevel.current = 0.75;
+    else performanceLevel.current = 1;
+
+  let stars: { x: number; y: number; r: number; z: number; p: number; baseY: number }[] = [];
+  // Constellations removed
+
+  // Cached star sprite for faster draws
+  const starSprite = document.createElement("canvas");
+  starSprite.width = 16;
+  starSprite.height = 16;
+  const sctx = starSprite.getContext("2d")!;
+  const sg = sctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+  sg.addColorStop(0, "rgba(255,255,255,1)");
+  sg.addColorStop(0.6, "rgba(255,255,255,0.85)");
+  sg.addColorStop(1, "rgba(255,255,255,0)");
+  sctx.fillStyle = sg;
+  sctx.beginPath();
+  sctx.arc(8, 8, 8, 0, Math.PI * 2);
+  sctx.fill();
+
+  // Cached glow sprite for aurora glints
+  const glowSprite = document.createElement("canvas");
+  glowSprite.width = 32;
+  glowSprite.height = 32;
+  const gctx = glowSprite.getContext("2d")!;
+  const gg = gctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  gg.addColorStop(0, "rgba(160,180,255,0.9)");
+  gg.addColorStop(0.55, "rgba(160,140,255,0.55)");
+  gg.addColorStop(1, "rgba(160,140,255,0)");
+  gctx.fillStyle = gg;
+  gctx.beginPath();
+  gctx.arc(16, 16, 16, 0, Math.PI * 2);
+  gctx.fill();
 
     const buildStars = () => {
-      const base = Math.max(220, Math.floor((w * h) / 12000));
-      const starCount = Math.floor(base * (isCoarse ? 0.4 : 0.7) * quality);
-      stars = Array.from({ length: starCount }, () => ({
-        x: Math.random() * w,
-        y: Math.random() * h,
-        r: 0.4 + Math.random() * 1.0,
-        z: 0.5 + Math.random() * 0.7,
-        p: Math.random() * Math.PI * 2,
-      }));
+      const baseDensity = Math.max(150, Math.floor((w * h) / 15000));
+      const starCount = Math.floor(baseDensity * performanceLevel.current * (isCoarse ? 0.6 : 1));
+      
+      stars = Array.from({ length: starCount }, () => {
+        const y = Math.random() * h;
+        return {
+          x: Math.random() * w,
+          y,
+          baseY: y,
+          r: 0.4 + Math.random() * 1.0,
+          z: 0.5 + Math.random() * 0.7,
+          p: Math.random() * Math.PI * 2,
+        };
+      });
+      
+      // Constellations removed
     };
 
-    const gradCache: { main: CanvasGradient | null; vignette: CanvasGradient | null } = { main: null, vignette: null };
+    // buildConstellations removed
+
+    // Cached gradients
+    const gradCache = {
+      main: null as CanvasGradient | null,
+      vignette: null as CanvasGradient | null,
+      shimmer: null as CanvasGradient | null,
+      radial: null as CanvasGradient | null,
+    };
 
     const resize = () => {
       w = window.innerWidth;
       h = window.innerHeight;
-            dpr = Math.min(1.5, window.devicePixelRatio || 1);
+      
+      // Adaptive DPI based on performance
+  const cap = performanceLevel.current >= 1 ? 2 : performanceLevel.current >= 0.75 ? 1.5 : 1.25;
+  dpr = Math.min(cap, window.devicePixelRatio || 1);
+      
       c.style.width = w + "px";
       c.style.height = h + "px";
       c.width = Math.floor(w * dpr);
       c.height = Math.floor(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      
+      // Clear all caches on resize
+      Object.keys(gradCache).forEach(key => {
+        gradCache[key as keyof typeof gradCache] = null;
+      });
+      
       buildStars();
-      gradCache.main = null;
-      gradCache.vignette = null;
     };
 
+    // Optimized resize handler
     let resizeTimeout: number | null = null;
     const onResize = () => {
       if (resizeTimeout) window.clearTimeout(resizeTimeout);
-      resizeTimeout = window.setTimeout(resize, 120);
+      resizeTimeout = window.setTimeout(resize, 150);
     };
     window.addEventListener("resize", onResize, { passive: true });
 
-  // We'll read scroll position in the frame loop to avoid quantization flicker
+  // Remove scroll timers: sample scroll in RAF with smoothing
 
-    const gradientMain = () => {
-      if (gradCache.main) return gradCache.main;
+    // Cached gradient functions
+    // Quantized time-varying main gradient cache
+    const gradMainCache = { key: -1, grad: null as CanvasGradient | null };
+    const gradientMain = (t?: number) => {
+      const steps = 16;
+      const idx = t ? Math.round(((Math.sin(t * 0.00022) + 1) * 0.5) * steps) : 0;
+      if (gradMainCache.grad && gradMainCache.key === idx) return gradMainCache.grad;
+      const sway = (idx / steps - 0.5) * 2; // -1..1
+      // Darker opacities so black background stays dominant
+      const a1 = Math.min(1, Math.max(0, 0.30 + 0.04 * sway));
+      const a2 = Math.min(1, Math.max(0, 0.34 - 0.04 * sway));
+      const a3 = Math.min(1, Math.max(0, 0.09 + 0.03 * (-sway)));
       const g = ctx.createLinearGradient(0, h * 0.45, 0, h * 0.7);
       g.addColorStop(0.0, "rgba(108,164,255,0.00)");
-      g.addColorStop(0.42, "rgba(108,164,255,0.38)");
-      g.addColorStop(0.7, "rgba(186,137,255,0.42)");
-      g.addColorStop(0.95, "rgba(255,168,94,0.14)");
+      g.addColorStop(0.42, `rgba(108,164,255,${a1})`);
+      g.addColorStop(0.7, `rgba(186,137,255,${a2})`);
+      g.addColorStop(0.95, `rgba(255,168,94,${a3})`);
       g.addColorStop(1.0, "rgba(255,168,94,0.00)");
-      gradCache.main = g;
+      gradMainCache.key = idx;
+      gradMainCache.grad = g;
       return g;
     };
 
@@ -154,87 +196,83 @@ const AuroraBackground = React.memo(React.forwardRef<{ burst: () => void }>(func
       return vg;
     };
 
+    const gradientRadial = () => {
+      if (gradCache.radial) return gradCache.radial;
+      const lgx = -w * 0.4, lgy = h * 0.46;
+    const lg = ctx.createRadialGradient(lgx, lgy, 0, lgx, lgy, Math.max(w, h) * 0.85);
+    lg.addColorStop(0, `rgba(108,164,255,0.22)`);
+      lg.addColorStop(1, "rgba(108,164,255,0.00)");
+      gradCache.radial = lg;
+      return lg;
+    };
+
+    const prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    
+  // Lowered render FPS (smoother scroll, less CPU)
+  const targetFPS = performanceLevel.current >= 0.75 ? 30 : 24;
+  const frameInterval = 1000 / targetFPS;
+
     resize();
 
-    // Pause rendering when tab is hidden
-    const onVis = () => {
-      if (document.hidden) {
-        if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      } else if (rafRef.current == null && !prefersReduced) {
-        lastFrameRef.current = 0;
-        rafRef.current = requestAnimationFrame(frame);
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
+  // Removed per-frame skipping; rely on lower FPS and fast-scroll simplifications
 
+    // Optimized star drawing with batching
     function drawStars(t: number) {
-      const step = Math.max(1, Math.floor(1 / quality));
-      for (let i = 0; i < stars.length; i += step) {
+      ctx.save();
+      const scrollOffset = scrollRef.current * 0.02;
+      
+      // Batch star operations
+      ctx.globalCompositeOperation = "source-over";
+      ctx.imageSmoothingEnabled = true;
+      
+      for (let i = 0; i < stars.length; i++) {
         const s = stars[i];
         const f = 0.55 + 0.45 * Math.sin(s.p + t * 0.003);
-        const y = s.y + scrollRef.current * 0.02 * (1 - s.z);
-        ctx.fillStyle = `rgba(255,255,255,${0.58 * s.z * f})`;
-        ctx.beginPath();
-        ctx.arc(s.x, y, s.r * s.z, 0, Math.PI * 2);
-        ctx.fill();
-        s.x += 0.012 * s.z;
-        if (s.x > w + 2) s.x = -2;
-      }
-    }
-
-    const noise = (x: number, t: number) =>
-      Math.sin(x * 0.002 + t * 0.00065) * 22 +
-      Math.sin(x * 0.004 + t * 0.00042) * 12 +
-      Math.sin(x * 0.008 + t * 0.00022) * 6;
-
-    const ctrls = (t: number, shift = 0, amp = 1) => {
-      const y0 = h * 0.3 + noise(0, t) * amp + shift;
-      const y1 = h * 0.45 + noise(w * 0.33, t) * amp + shift;
-      const y2 = h * 0.6 + noise(w * 0.66, t) * amp + shift;
-      const y3 = h * 0.75 + noise(w, t) * amp + shift;
-      return { y0, y1, y2, y3 };
-    };
-
-    let shimmerGrad: CanvasGradient | null = null;
-    let shimmerUntil = -1;
-    const gradientShimmer = (t: number) => {
-      // Recreate shimmer gradient at most every ~32ms to prevent flicker
-      if (shimmerGrad && t < shimmerUntil) return shimmerGrad;
-      const sweep = (Math.sin(t * 0.00055) + 1) * 0.5;
-      const g = ctx.createLinearGradient(0, h * (0.5 - 0.06 + sweep * 0.12), 0, h * (0.5 + 0.06 + sweep * 0.12));
-      g.addColorStop(0, "rgba(255,255,255,0)");
-      g.addColorStop(0.5, "rgba(255,255,255,0.08)");
-      g.addColorStop(1, "rgba(255,255,255,0)");
-      shimmerGrad = g;
-      shimmerUntil = t + 32; // cache for ~2 frames
-      return g;
-    };
-
-    function striations(x0: number, y0: number, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, t: number, widthBase: number) {
-      ctx.save();
-      ctx.globalCompositeOperation = "screen";
-      const lines = Math.floor(18 * quality);
-      for (let i = 0; i < lines; i++) {
-        const k = i / (lines - 1);
-        const r = Math.round(108 + (186 - 108) * k);
-        const g = Math.round(164 + (137 - 164) * k);
-        const b = 255;
-        const pulse = 0.5 + 0.5 * Math.sin(t * 0.0012 + i * 0.6);
-        const alpha = 0.045 + 0.03 * pulse;
-        const wob = (Math.sin(i * 0.5 + t * 0.003) + Math.sin(i * 0.8 + t * 0.002)) * 4;
-        ctx.beginPath();
-        ctx.moveTo(x0 - 140, y0 + wob);
-        ctx.bezierCurveTo(x1, y1 + wob, x2, y2 - wob, x3 + 140, y3 + wob);
-        ctx.filter = "blur(2px)";
-        ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
-        ctx.lineWidth = widthBase * 0.018;
-        ctx.stroke();
+        const y = s.baseY + scrollOffset * (1 - s.z);
+        
+        // Only draw stars that are visible
+        if (y > -10 && y < h + 10 && s.x > -10 && s.x < w + 10) {
+          // Slightly dimmer so black feels more dominant
+          const alpha = 0.55 * s.z * f;
+          if (alpha > 0.1) { // Skip very faint stars
+            ctx.globalAlpha = alpha;
+            const size = Math.max(1, (s.r * s.z) * 4);
+            ctx.drawImage(starSprite, s.x - size / 2, y - size / 2, size, size);
+          }
+        }
+        
+  // Update position less frequently (adaptive)
+  const stepDiv = performanceLevel.current >= 1 ? 3 : performanceLevel.current >= 0.75 ? 4 : 5;
+  if (i % stepDiv === 0) {
+          s.x += 0.012 * s.z * performanceLevel.current;
+          if (s.x > w + 2) s.x = -2;
+        }
       }
       ctx.restore();
     }
 
+    // Simplified noise function with fewer calculations
+    const noise = (x: number, t: number) =>
+      Math.sin(x * 0.002 + t * 0.00065) * 22 +
+      Math.sin(x * 0.004 + t * 0.00042) * 12;
+
+    const ctrls = (t: number, shift = 0, amp = 1) => {
+      const y0 = h * 0.3 + noise(0, t) * amp + shift;
+      const y1 = h * 0.45 + noise(w * 0.25, t) * amp + shift;
+      const y2 = h * 0.6 + noise(w * 0.45, t) * amp + shift;
+      const y3 = h * 0.75 + noise(w, t) * amp + shift;
+      return { y0, y1, y2, y3 };
+    };
+
+  // Shimmer removed entirely
+
+  // Striations kept but disabled
+  const SHOW_STRIATIONS = false;
+  function striations() { /* disabled */ }
+
+    // Optimized aurora drawing
   function drawAurora(t: number) {
+      const fast = fastScrollRef.current;
       const parY = Math.min(90, scrollRef.current * 0.09);
       const boost = 1 + burstRef.current * 2.5;
 
@@ -245,112 +283,165 @@ const AuroraBackground = React.memo(React.forwardRef<{ burst: () => void }>(func
       ctx.rotate(-0.34);
       ctx.translate(-w * 0.75, -h * 0.5);
 
-  const lgx = -w * 0.4, lgy = h * 0.46;
-      const lg = ctx.createRadialGradient(lgx, lgy, 0, lgx, lgy, Math.max(w, h) * 0.85);
-      lg.addColorStop(0, `rgba(108,164,255,${0.4 * (1 + burstRef.current * 0.8)})`);
-      lg.addColorStop(1, "rgba(108,164,255,0.00)");
-      ctx.fillStyle = lg;
+  // Use cached radial gradient with slight breathing (darker)
+  ctx.fillStyle = gradientRadial();
+  const breath = 0.9 + 0.06 * Math.sin(t * 0.0003);
+  ctx.globalAlpha = 0.85 * breath * (1 + burstRef.current * 0.6);
       ctx.fillRect(-w, -h, w * 2, h * 2);
+      ctx.globalAlpha = 1;
 
-  const X0 = -w * 0.28, X1 = w * 0.25, X2 = w * 0.6, X3 = w * 1.3;
-  const m = ctrls(t, 0, 1);
-  // Build path once and reuse across strokes
-  const pathMain = new Path2D();
-  pathMain.moveTo(X0, m.y0);
-  pathMain.bezierCurveTo(X1, m.y1, X2, m.y2, X3, m.y3);
-      let WMAIN = Math.max(120, Math.min(185, w * 0.1));
-      let WECHO = Math.max(90, Math.min(130, w * 0.072));
-      WMAIN *= boost;
-      WECHO *= boost;
+      // Quantize time for control points to ~30Hz
+      const tq = Math.floor(t / 33) * 33;
+      const m = ctrls(tq, 0, 1);
+      const X0 = -w * 0.28, X1 = w * 0.25, X2 = w * 0.6, X3 = w * 1.3;
+      
+      // Adaptive blur and width based on performance
+      let WMAIN = Math.max(120, Math.min(185, w * 0.1)) * boost;
+      let WECHO = Math.max(90, Math.min(130, w * 0.072)) * boost;
+      let blurMain = Math.floor((28 * boost) * performanceLevel.current);
+      let blurShimmer = Math.floor((18 * boost) * performanceLevel.current);
+      let blurEcho = Math.floor((38 * boost) * performanceLevel.current);
+      if (fast) {
+        // Keep lines visible during fast scroll: reduce blur a bit but keep widths
+        blurMain = Math.max(12, Math.floor(blurMain * 0.75));
+        blurShimmer = Math.max(10, Math.floor(blurShimmer * 0.75));
+        blurEcho = Math.max(14, Math.floor(blurEcho * 0.7));
+      }
 
       ctx.globalCompositeOperation = "screen";
 
-  // Keep blur radii stable to avoid flicker when adaptive quality changes
-  ctx.filter = `blur(${28 * boost}px) saturate(${140 + burstRef.current * 60}%)`;
-  ctx.strokeStyle = gradientMain();
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.lineWidth = WMAIN;
-  ctx.stroke(pathMain);
+  // Main aurora path (reduced saturation)
+  ctx.filter = `blur(${blurMain}px) saturate(${120 + burstRef.current * 50}%)`;
+  ctx.strokeStyle = gradientMain(tq);
+      ctx.beginPath();
+      ctx.moveTo(X0, m.y0);
+      ctx.bezierCurveTo(X1, m.y1, X2, m.y2, X3, m.y3);
+      ctx.lineWidth = WMAIN;
+      ctx.stroke();
 
-  ctx.filter = `blur(${18 * boost}px) saturate(${150 + burstRef.current * 60}%)`;
-      ctx.strokeStyle = gradientShimmer(t);
-  ctx.lineWidth = WMAIN * 0.55;
-  ctx.stroke(pathMain);
+  // Shimmer layer removed to eliminate thin line and improve performance
 
-  const e = ctrls(t, 64, 0.9);
-  const pathEcho = new Path2D();
-  pathEcho.moveTo(X0, e.y0);
-  pathEcho.bezierCurveTo(X1, e.y1, X2, e.y2, X3, e.y3);
-  ctx.filter = `blur(${38 * boost}px) saturate(${140 + burstRef.current * 50}%)`;
-      ctx.globalAlpha = 0.45;
-      ctx.strokeStyle = gradientMain();
-  ctx.lineWidth = WECHO;
-  ctx.stroke(pathEcho);
-      ctx.globalAlpha = 1;
-
-      if (quality > 0.7) {
-        striations(X0, m.y0, X1, m.y1, X2, m.y2, X3, m.y3, t, WMAIN);
+      // Echo layer (dimmer)
+      {
+        const e = ctrls(tq, 64, 0.9);
+        ctx.filter = `blur(${blurEcho}px) saturate(${120 + burstRef.current * 45}%)`;
+        ctx.globalAlpha = 0.25;
+        ctx.strokeStyle = gradientMain(tq);
+        ctx.beginPath();
+        ctx.moveTo(X0, e.y0);
+        ctx.bezierCurveTo(X1, e.y1, X2, e.y2, X3, e.y3);
+        ctx.lineWidth = WECHO;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
       }
-      ctx.restore();
 
-      // Constellation lines (optimized)
-  if (quality > 0.6) {
+  // Striations disabled
+
+      // Lightweight glints along the path (kept minimal for performance)
+      if (!fast) {
+        const count = performanceLevel.current >= 1 ? 6 : performanceLevel.current >= 0.75 ? 4 : 2;
+        const cubic = (a: number, b: number, c: number, d: number, tt: number) => {
+          const it = 1 - tt;
+          return it * it * it * a + 3 * it * it * tt * b + 3 * it * tt * tt * c + tt * tt * tt * d;
+        };
         ctx.save();
         ctx.globalCompositeOperation = "screen";
-  ctx.filter = `blur(${1 + burstRef.current * 1.5}px)`;
-        const maxDist = 110 + burstRef.current * 120;
-        ctx.lineWidth = 0.6;
-    const step = Math.max(1, Math.floor(2 / quality));
-    let linesDrawn = 0;
-    const maxLines = Math.floor(300 * quality);
-    outer: for (let i = 0; i < stars.length; i += step * 2) {
-          const a = stars[i];
-          for (let j = i + 1; j < Math.min(i + 18, stars.length); j += step * 3) {
-            const b = stars[j];
-            const dx = a.x - b.x, dy = a.y - b.y;
-            const d = Math.hypot(dx, dy);
-            if (d < maxDist) {
-              const alpha = (1 - d / maxDist) * 0.18 * (0.6 + 0.4 * burstRef.current);
-              ctx.strokeStyle = `rgba(150,170,255,${alpha})`;
-              ctx.beginPath();
-              ctx.moveTo(a.x, a.y);
-              ctx.lineTo(b.x, b.y);
-              ctx.stroke();
-      if (++linesDrawn >= maxLines) break outer;
-            }
-          }
+        for (let i = 0; i < count; i++) {
+          const p = (i / count + (t * 0.00008)) % 1;
+          const gx = cubic(X0, X1, X2, X3, p);
+          const gy = cubic(m.y0, m.y1, m.y2, m.y3, p);
+          const size = 22 + 16 * Math.sin(t * 0.001 + i);
+          ctx.globalAlpha = 0.08 + 0.12 * Math.max(0, Math.min(1, burstRef.current));
+          ctx.filter = "blur(10px)";
+          ctx.drawImage(glowSprite, gx - size / 2, gy - size / 2, size, size);
         }
         ctx.restore();
       }
+      
+      ctx.restore();
 
-  ctx.filter = "none";
-  ctx.fillStyle = gradientVignette();
-  ctx.fillRect(0, 0, w, h);
+  // Constellations removed
+
+      // Vignette moved to CSS overlay to avoid per-frame fill
     }
 
+    // RAF loop
     function frame(t: number) {
-      // Frame rate limiting
-      if (t - lastFrameRef.current < 16.67) {
+      // FPS limiting for performance
+      if (t - lastFrameTime.current < frameInterval) {
         rafRef.current = requestAnimationFrame(frame);
         return;
       }
-      
-      recordFrame();
-  // Read scroll inline to avoid event batching artifacts
-  scrollRef.current = window.scrollY || 0;
-      
+
+      // Smoothly sample scroll
+      const targetScroll = window.scrollY || 0;
+      scrollRef.current += (targetScroll - scrollRef.current) * 0.15;
+
+      // Detect fast scroll and simplify effects briefly
+      const dy = Math.abs(targetScroll - (lastScrollY.current || targetScroll));
+      const dtScroll = t - (lastScrollT.current || t);
+      if (dtScroll > 0) {
+        const speed = dy / dtScroll; // px per ms
+        if (speed > 2) fastScrollUntil.current = t + 180;
+      }
+      lastScrollY.current = targetScroll;
+      lastScrollT.current = t;
+      fastScrollRef.current = t < fastScrollUntil.current;
+
+      // Perf sampling & dynamic adjustment
+      if (lastPerfSample.current) {
+        const dt = t - lastPerfSample.current;
+        perfSamples.push(dt);
+        if (perfSamples.length > 40) perfSamples.shift();
+        if (adjustCooldown > 0) adjustCooldown--;
+        if (perfSamples.length >= 30 && adjustCooldown === 0) {
+          const avg = perfSamples.reduce((a, b) => a + b, 0) / perfSamples.length;
+          if (avg > 24 && performanceLevel.current > 0.5) {
+            performanceLevel.current = performanceLevel.current >= 1 ? 0.75 : 0.5;
+            resize();
+            adjustCooldown = 120;
+          } else if (avg < 17 && performanceLevel.current < 1) {
+            performanceLevel.current = performanceLevel.current < 0.75 ? 0.75 : 1;
+            resize();
+            adjustCooldown = 160;
+          }
+        }
+      }
+      lastPerfSample.current = t;
+      lastFrameTime.current = t;
+
+      // Draw
       ctx.filter = "none";
+      ctx.globalCompositeOperation = "source-over";
       ctx.clearRect(0, 0, w, h);
       drawStars(t);
+      // Always draw aurora each frame; rely on lower FPS + fast-scroll simplification
       drawAurora(t);
-      lastFrameRef.current = t;
+
       rafRef.current = requestAnimationFrame(frame);
     }
 
-    if (!prefersReduced) {
+    // Intersection Observer to pause when not visible
+    let isVisible = true;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        isVisible = entry.isIntersecting;
+        if (!isVisible && rafRef.current) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        } else if (isVisible && !rafRef.current && !prefersReduced) {
+          rafRef.current = requestAnimationFrame(frame);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    if (c) observer.observe(c);
+
+    if (!prefersReduced && isVisible) {
       rafRef.current = requestAnimationFrame(frame);
     } else {
+      // Static render for reduced motion
       ctx.clearRect(0, 0, w, h);
       drawStars(0);
       drawAurora(0);
@@ -358,18 +449,23 @@ const AuroraBackground = React.memo(React.forwardRef<{ burst: () => void }>(func
 
     return () => {
       window.removeEventListener("resize", onResize);
-      document.removeEventListener("visibilitychange", onVis);
+      observer.disconnect();
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      if (resizeTimeout) clearTimeout(resizeTimeout);
     };
-  }, [quality, recordFrame]);
+  }, []);
 
-  return <canvas ref={canvasRef} className="fixed inset-0 z-0 pointer-events-none" />;
-}));
+  return (
+    <>
+      <canvas ref={canvasRef} className="fixed inset-0 z-0 pointer-events-none will-change-transform" />
+    </>
+  );
+});
 
 /* =========================================================
    Layout helpers
    =======================================================*/
-const Container = React.memo(function Container({
+function Container({
   children,
   className = "",
 }: {
@@ -381,9 +477,9 @@ const Container = React.memo(function Container({
       {children}
     </div>
   );
-});
+}
 
-const Section = React.memo(function Section({
+function Section({
   id,
   className = "",
   children,
@@ -393,32 +489,27 @@ const Section = React.memo(function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section
-      id={id}
-      className={`relative py-12 sm:py-16 md:py-20 ${className}`}
-      style={{ contentVisibility: "auto", containIntrinsicSize: "800px" }}
-    >
+    <section id={id} className={`relative py-12 sm:py-16 md:py-20 ${className}`}>
       <Orbs />
       <Container>{children}</Container>
     </section>
   );
-});
+}
 
 /* =========================================================
    Micro-interactions (optimized)
    =======================================================*/
 function useSmoothScroll() {
   const ease = React.useCallback(
-    (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+    (t: number) =>
+      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
     []
   );
 
-  const reduced = React.useMemo(() =>
+  const reduced =
     typeof window !== "undefined" &&
     window.matchMedia &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    []
-  );
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   return React.useCallback((id: string) => {
     const el = document.getElementById(id);
@@ -448,10 +539,8 @@ function useSmoothScroll() {
 
 function useActiveSection(ids: string[]) {
   const [active, setActive] = React.useState(ids[0]);
-  
   React.useEffect(() => {
     if (!('IntersectionObserver' in window)) return;
-    
     const obs = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
@@ -460,27 +549,22 @@ function useActiveSection(ids: string[]) {
       },
       { rootMargin: "-40% 0px -55% 0px", threshold: 0.01 }
     );
-    
     ids.forEach((id) => {
       const el = document.getElementById(id);
       if (el) obs.observe(el);
     });
-    
     return () => obs.disconnect();
   }, [ids]);
-  
   return active;
 }
 
 function useMagnetic() {
   const ref = React.useRef<HTMLButtonElement | null>(null);
-  
   React.useEffect(() => {
     const el = ref.current;
-    if (!el || !window.matchMedia("(pointer: fine)").matches) return;
+    if (!el || window.matchMedia && !window.matchMedia("(pointer: fine)").matches) return;
     
     let rafId: number | null = null;
-    
     const onMove = (e: MouseEvent) => {
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
@@ -491,7 +575,6 @@ function useMagnetic() {
         rafId = null;
       });
     };
-    
     const onLeave = () => {
       if (rafId) {
         cancelAnimationFrame(rafId);
@@ -499,31 +582,26 @@ function useMagnetic() {
       }
       el.style.transform = `translate(0,0)`;
     };
-    
     el.addEventListener("mousemove", onMove, { passive: true });
-    el.addEventListener("mouseleave", onLeave, { passive: true });
-    
+    el.addEventListener("mouseleave", onLeave);
     return () => {
-      if (rafId) cancelAnimationFrame(rafId);
       el.removeEventListener("mousemove", onMove);
       el.removeEventListener("mouseleave", onLeave);
+      if (rafId) cancelAnimationFrame(rafId);
     };
   }, []);
-  
   return ref;
 }
 
 function useTilt() {
   const ref = React.useRef<HTMLDivElement | null>(null);
-  
   React.useEffect(() => {
-    if (!window.matchMedia("(pointer: fine)").matches) return;
+    if (window.matchMedia && !window.matchMedia("(pointer: fine)").matches) return;
     
     const el = ref.current;
     if (!el) return;
     
     let rafId: number | null = null;
-    
     const onMove = (e: MouseEvent) => {
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
@@ -539,7 +617,6 @@ function useTilt() {
         rafId = null;
       });
     };
-    
     const reset = () => {
       if (rafId) {
         cancelAnimationFrame(rafId);
@@ -548,50 +625,28 @@ function useTilt() {
       el.style.transform = "";
       el.style.boxShadow = "";
     };
-    
     el.addEventListener("mousemove", onMove, { passive: true });
-    el.addEventListener("mouseleave", reset, { passive: true });
-    
+    el.addEventListener("mouseleave", reset);
     return () => {
-      if (rafId) cancelAnimationFrame(rafId);
       el.removeEventListener("mousemove", onMove);
       el.removeEventListener("mouseleave", reset);
+      if (rafId) cancelAnimationFrame(rafId);
     };
   }, []);
-  
   return ref;
 }
 
 /* =========================================================
-   Decorative Orbs (memoized)
+   Decorative Orbs (optimized)
    =======================================================*/
-const Orbs = React.memo(function Orbs() {
-  return (
-    <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
-      <div
-        className="absolute w-48 sm:w-64 h-48 sm:h-64 rounded-full blur-3xl opacity-20"
-        style={{
-          left: "-4rem",
-          top: "-2rem",
-          background: "radial-gradient(circle,#6CA4FF55,transparent 60%)",
-        }}
-      />
-      <div
-        className="absolute w-48 sm:w-64 h-48 sm:h-64 rounded-full blur-3xl opacity-20"
-        style={{
-          right: "-3rem",
-          bottom: "-2rem",
-          background: "radial-gradient(circle,#BA89FF55,transparent 60%)",
-        }}
-      />
-    </div>
-  );
-});
+function Orbs() {
+  return null;
+}
 
 /* =========================================================
-   Back to top button (optimized)
+   Back to top button
    =======================================================*/
-const BackToTop = React.memo(function BackToTop() {
+function BackToTop() {
   const [show, setShow] = React.useState(false);
   const scrollTo = useSmoothScroll();
   
@@ -612,54 +667,53 @@ const BackToTop = React.memo(function BackToTop() {
   }, []);
   
   if (!show) return null;
-  
   return (
     <button
       onClick={() => scrollTo("home")}
       aria-label="Back to top"
-      className="fixed bottom-6 right-6 z-30 rounded-full bg-white text-black shadow-lg hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 w-12 h-12 grid place-items-center transform-gpu"
+      className="fixed bottom-6 right-6 z-30 rounded-full bg-white text-black shadow-lg hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 w-12 h-12 grid place-items-center will-change-transform"
     >
       ↑
     </button>
   );
-});
+}
 
 /* =========================================================
-   Floating CTA Dock (memoized)
+   Floating CTA Dock
    =======================================================*/
-const CTADock = React.memo(function CTADock({ onQuote }: { onQuote: () => void }) {
+function CTADock({ onQuote }: { onQuote: () => void }) {
   return (
-    <div className="fixed bottom-4 right-4 z-20 hidden sm:flex items-center gap-1.5 p-1.5 rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm">
+    <div className="fixed bottom-4 right-4 z-20 hidden sm:flex items-center gap-1.5 p-1.5 rounded-xl border border-white/10 bg-white/5 backdrop-blur-sm will-change-transform">
       <button
         onClick={onQuote}
-        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black text-sm font-medium hover:opacity-90 transform-gpu"
+        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black text-sm font-medium hover:opacity-90"
       >
         <Mail className="w-3.5 h-3.5" /> Get a quote
       </button>
       <a
         href="tel:+21612345678"
-        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 text-sm transform-gpu"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 text-sm"
       >
         <Phone className="w-3.5 h-3.5" /> Call
       </a>
       <a
         href="mailto:hello@starwaves.tn"
-        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 text-sm transform-gpu"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 text-sm"
       >
         <Send className="w-3.5 h-3.5" /> Email
       </a>
     </div>
   );
-});
+}
 
 /* =========================================================
-   Process Timeline (memoized)
+   Process Timeline
    =======================================================*/
-const StepCard = React.memo(function StepCard({ title, desc, index }: { title: string; desc: string; index: number }) {
+function StepCard({ title, desc, index }: { title: string; desc: string; index: number }) {
   return (
     <div className="relative group">
       <GradientRing />
-      <div className="relative rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm transform-gpu">
+      <div className="relative rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
         <div className="flex items-start gap-4">
           <div className="shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-[#6CA4FF]/80 to-[#BA89FF]/80 text-black font-semibold grid place-items-center">
             <span className="text-black">{index}</span>
@@ -672,17 +726,16 @@ const StepCard = React.memo(function StepCard({ title, desc, index }: { title: s
       </div>
     </div>
   );
-});
+}
 
-const ProcessSection = React.memo(function ProcessSection() {
-  const steps = React.useMemo(() => [
+function ProcessSection() {
+  const steps = [
     { title: "Discovery", desc: "Objectives, stakeholders, constraints, and KPIs." },
     { title: "Design", desc: "Experience mapping, scenography, media plan, and budgets." },
     { title: "Pre‑production", desc: "Vendors, CADs, run‑of‑show, logistics & risk playbooks." },
     { title: "Onsite ops", desc: "Hotel desk, stage & AV, transport, and branding install." },
     { title: "Wrap & report", desc: "Strike, reconciliation, and post‑event media delivery." },
-  ], []);
-
+  ];
   return (
     <Section id="process">
       <Reveal>
@@ -700,17 +753,17 @@ const ProcessSection = React.memo(function ProcessSection() {
       </div>
     </Section>
   );
-});
+}
 
 /* =========================================================
-   Testimonials (memoized)
+   Testimonials
    =======================================================*/
-const TestimonialCard = React.memo(function TestimonialCard({ quote, author, role }: { quote: string; author: string; role: string }) {
+function TestimonialCard({ quote, author, role }: { quote: string; author: string; role: string }) {
   return (
     <div className="relative group">
       <GradientRing />
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm transform-gpu">
-        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(500px circle at 20% 0%, rgba(255,255,255,0.06), transparent 60%)" }} />
+      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
+        {/* decorative radial removed */}
         <div className="relative">
           <div className="text-white/90 italic">"{quote}"</div>
           <div className="mt-4 text-sm text-white/70">{author} — {role}</div>
@@ -718,15 +771,14 @@ const TestimonialCard = React.memo(function TestimonialCard({ quote, author, rol
       </div>
     </div>
   );
-});
+}
 
-const Testimonials = React.memo(function Testimonials() {
-  const items = React.useMemo(() => [
+function Testimonials() {
+  const items = [
     { quote: "Flawless operations and a creative team we could trust.", author: "Chapter Chair", role: "Medical Society" },
     { quote: "From venues to media, everything was coordinated and clear.", author: "Program Director", role: "Gov Forum" },
     { quote: "Attendees loved the production value and pace.", author: "Event Manager", role: "Expo" },
-  ], []);
-
+  ];
   return (
     <Section id="testimonials">
       <Reveal>
@@ -742,15 +794,15 @@ const Testimonials = React.memo(function Testimonials() {
       </div>
     </Section>
   );
-});
+}
 
 /* =========================================================
-   FAQ (Accordion) (memoized)
+   FAQ (Accordion)
    =======================================================*/
-const FAQItem = React.memo(function FAQItem({ q, a }: { q: string; a: string }) {
+function FAQItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = React.useState(false);
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5 transform-gpu">
+    <div className="rounded-xl border border-white/10 bg-white/5">
       <button
         className="w-full flex items-center justify-between gap-4 px-4 py-3 text-left hover:bg-white/5 rounded-xl transition-colors"
         onClick={() => setOpen((v) => !v)}
@@ -764,17 +816,16 @@ const FAQItem = React.memo(function FAQItem({ q, a }: { q: string; a: string }) 
       )}
     </div>
   );
-});
+}
 
-const FAQ = React.memo(function FAQ() {
-  const faqs = React.useMemo(() => [
+function FAQ() {
+  const faqs = [
     { q: "How fast can you quote?", a: "Typically within 48 hours with at least one venue option and draft budget." },
     { q: "Do you work outside Tunisia?", a: "Yes, via partner networks; brokerage and media remain in-house." },
     { q: "Minimum event size?", a: "We tailor to scope; from 150 pax breakouts to 2,000+ plenaries." },
     { q: "Do you support hybrid/streaming?", a: "Yes — multi-cam, hybrid stages, and multilingual streaming." },
     { q: "Can you handle branding & expo booths?", a: "Full print ecosystem, wayfinding, lanyards, booths, and overnight installs." },
-  ], []);
-
+  ];
   return (
     <Section id="faq">
       <Reveal>
@@ -788,12 +839,12 @@ const FAQ = React.memo(function FAQ() {
       </div>
     </Section>
   );
-});
+}
 
 /* =========================================================
-   Gradient Ring (hover) (memoized)
+   Gradient Ring (hover)
    =======================================================*/
-const GradientRing = React.memo(function GradientRing() {
+function GradientRing() {
   return (
     <span
       data-test="grad-ring"
@@ -802,19 +853,20 @@ const GradientRing = React.memo(function GradientRing() {
       style={{
         background: "linear-gradient(90deg, #6CA4FF, #BA89FF, #FFA85E)",
         padding: "1px",
-        WebkitMask: "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
+        WebkitMask:
+          "linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)",
         WebkitMaskComposite: "xor",
         maskComposite: "exclude",
         borderRadius: "1rem",
       }}
     />
   );
-});
+}
 
 /* =========================================================
-   Nav (optimized)
+   Nav
    =======================================================*/
-const Nav = React.memo(function Nav() {
+function Nav() {
   const scrollTo = useSmoothScroll();
   const active = useActiveSection([
     "home",
@@ -826,18 +878,18 @@ const Nav = React.memo(function Nav() {
   ]);
   const [open, setOpen] = React.useState(false);
 
-  const link = React.useCallback((id: string) => (e?: React.MouseEvent) => {
+  const link = (id: string) => (e?: React.MouseEvent) => {
     if (e) e.preventDefault();
     setOpen(false);
     scrollTo(id);
-  }, [scrollTo]);
+  };
 
-  const linkClass = React.useCallback((id: string) =>
+  const linkClass = (id: string) =>
     `hover:text-white relative transition-colors ${
       active === id
         ? "text-white after:content-[''] after:absolute after:-bottom-1 after:left-0 after:h-[2px] after:w-full after:bg-white/70"
         : "text-white/80"
-    }`, [active]);
+    }`;
 
   return (
     <>
@@ -861,19 +913,35 @@ const Nav = React.memo(function Nav() {
             <a href="#home" onClick={link("home")} className={linkClass("home")}>
               Home
             </a>
-            <a href="#services" onClick={link("services")} className={linkClass("services")}>
+            <a
+              href="#services"
+              onClick={link("services")}
+              className={linkClass("services")}
+            >
               Services
             </a>
-            <a href="#partners" onClick={link("partners")} className={linkClass("partners")}>
+            <a
+              href="#partners"
+              onClick={link("partners")}
+              className={linkClass("partners")}
+            >
               Partners
             </a>
             <a href="#work" onClick={link("work")} className={linkClass("work")}>
               Work
             </a>
-            <a href="#about" onClick={link("about")} className={linkClass("about")}>
+            <a
+              href="#about"
+              onClick={link("about")}
+              className={linkClass("about")}
+            >
               About
             </a>
-            <a href="#contact" onClick={link("contact")} className={linkClass("contact")}>
+            <a
+              href="#contact"
+              onClick={link("contact")}
+              className={linkClass("contact")}
+            >
               Contact
             </a>
           </nav>
@@ -908,19 +976,35 @@ const Nav = React.memo(function Nav() {
               <a href="#home" onClick={link("home")} className="hover:text-white transition-colors">
                 Home
               </a>
-              <a href="#services" onClick={link("services")} className="hover:text-white transition-colors">
+              <a
+                href="#services"
+                onClick={link("services")}
+                className="hover:text-white transition-colors"
+              >
                 Services
               </a>
-              <a href="#partners" onClick={link("partners")} className="hover:text-white transition-colors">
+              <a
+                href="#partners"
+                onClick={link("partners")}
+                className="hover:text-white transition-colors"
+              >
                 Partners
               </a>
               <a href="#work" onClick={link("work")} className="hover:text-white transition-colors">
                 Work
               </a>
-              <a href="#about" onClick={link("about")} className="hover:text-white transition-colors">
+              <a
+                href="#about"
+                onClick={link("about")}
+                className="hover:text-white transition-colors"
+              >
                 About
               </a>
-              <a href="#contact" onClick={link("contact")} className="hover:text-white transition-colors">
+              <a
+                href="#contact"
+                onClick={link("contact")}
+                className="hover:text-white transition-colors"
+              >
                 Contact
               </a>
             </nav>
@@ -929,12 +1013,12 @@ const Nav = React.memo(function Nav() {
       )}
     </>
   );
-});
+}
 
 /* =========================================================
-   Cards (memoized)
+   Cards
    =======================================================*/
-const ServiceCard = React.memo(function ServiceCard({
+function ServiceCard({
   title,
   desc,
   points,
@@ -948,7 +1032,7 @@ const ServiceCard = React.memo(function ServiceCard({
   return (
     <div className="relative group" data-test="service-card">
       <GradientRing />
-      <div className="relative rounded-2xl border border-white/10 bg-white/5 p-6 sm:p-7 md:p-8 backdrop-blur-sm transition-shadow hover:shadow-[0_0_40px_0_rgba(186,137,255,0.12)] transform-gpu">
+      <div className="relative rounded-2xl border border-white/10 bg-white/5 p-6 sm:p-7 md:p-8 backdrop-blur-sm transition-shadow hover:shadow-[0_0_40px_0_rgba(186,137,255,0.12)]">
         <div className="flex items-start gap-4">
           <div className="shrink-0 rounded-xl border border-white/10 bg-white/10 p-2">
             <Icon className="w-6 h-6 text-white/90" />
@@ -971,9 +1055,9 @@ const ServiceCard = React.memo(function ServiceCard({
       </div>
     </div>
   );
-});
+}
 
-const WorkCard = React.memo(function WorkCard({
+function WorkCard({
   title,
   role,
   tags = [],
@@ -988,20 +1072,9 @@ const WorkCard = React.memo(function WorkCard({
       <GradientRing />
       <div
         ref={tiltRef}
-        className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 to-white/0 p-6 sm:p-7 md:p-8 backdrop-blur-[2px] hover:from-white/10 transition-colors will-change-transform transform-gpu"
+        className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 to-white/0 p-6 sm:p-7 md:p-8 backdrop-blur-[2px] hover:from-white/10 transition-all will-change-transform"
       >
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 rounded-2xl"
-          style={{
-            background: "radial-gradient(400px circle at var(--mx,50%) var(--my,50%), rgba(255,255,255,0.08), rgba(186,137,255,0.06) 25%, transparent 60%)",
-            mixBlendMode: "overlay",
-          }}
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,rgba(255,255,255,0.06),transparent_60%)]"
-        />
+  {/* decorative radials removed */}
         <div className="relative">
           <div className="text-sm text-white/70">{role}</div>
           <div className="text-xl sm:text-2xl font-semibold">{title}</div>
@@ -1021,12 +1094,12 @@ const WorkCard = React.memo(function WorkCard({
       </div>
     </div>
   );
-});
+}
 
 /* =========================================================
    Reveal (optimized)
    =======================================================*/
-const Reveal = React.memo(function Reveal({
+function Reveal({
   children,
   delay = 0,
   className = "",
@@ -1039,8 +1112,8 @@ const Reveal = React.memo(function Reveal({
   const [inView, setInView] = React.useState(false);
   
   React.useEffect(() => {
-    const current = ref.current;
-    if (!current) return;
+    const el = ref.current;
+    if (!el) return;
     
     const io = new IntersectionObserver(
       (entries) => {
@@ -1051,10 +1124,10 @@ const Reveal = React.memo(function Reveal({
           }
         });
       },
-      { threshold: 0.18 }
+      { threshold: 0.18, rootMargin: "50px" }
     );
     
-    io.observe(current);
+    io.observe(el);
     return () => io.disconnect();
   }, []);
   
@@ -1062,24 +1135,22 @@ const Reveal = React.memo(function Reveal({
     <div
       ref={ref}
       style={{ transitionDelay: `${delay}ms` }}
-      className={`opacity-0 translate-y-6 scale-[.98] will-change-transform transition duration-700 ease-out transform-gpu ${
+      className={`opacity-0 translate-y-6 scale-[.98] will-change-transform transition duration-700 ease-out ${
         inView ? "opacity-100 translate-y-0 scale-100" : ""
       } ${className}`}
     >
       {children}
     </div>
   );
-});
+}
 
 /* =========================================================
    Extras (optimized)
    =======================================================*/
-const ScrollProgressBar = React.memo(function ScrollProgressBar({ show = true }: { show?: boolean }) {
+function ScrollProgressBar({ show = true }: { show?: boolean }) {
   const ref = React.useRef<HTMLDivElement | null>(null);
-  
   React.useEffect(() => {
     if (!show) return;
-    
     const el = ref.current!;
     let ticking = false;
     
@@ -1101,29 +1172,30 @@ const ScrollProgressBar = React.memo(function ScrollProgressBar({ show = true }:
   }, [show]);
   
   if (!show) return null;
-  
   return (
     <div className="fixed top-0 left-0 right-0 z-[30] h-[3px] bg-transparent">
       <div
         ref={ref}
-        className="origin-left h-full bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] scale-x-0 transition-transform duration-75 transform-gpu"
+        className="origin-left h-full bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] scale-x-0 will-change-transform"
       />
     </div>
   );
-});
+}
 
-const CountUp = React.memo(function CountUp({ to, label }: { to: number; label: string }) {
+function CountUp({ to, label }: { to: number; label: string }) {
   const ref = React.useRef<HTMLDivElement | null>(null);
   const [val, setVal] = React.useState(0);
+  const hasAnimated = React.useRef(false);
   
   React.useEffect(() => {
-    const current = ref.current;
-    if (!current) return;
+    if (hasAnimated.current) return;
     
     const obs = new IntersectionObserver(
       ([e]) => {
-        if (!e.isIntersecting) return;
+        if (!e.isIntersecting || hasAnimated.current) return;
+        hasAnimated.current = true;
         obs.disconnect();
+        
         const start = performance.now();
         const dur = 1200;
         const from = 0;
@@ -1138,14 +1210,14 @@ const CountUp = React.memo(function CountUp({ to, label }: { to: number; label: 
       { threshold: 0.4 }
     );
     
-    obs.observe(current);
+    if (ref.current) obs.observe(ref.current);
     return () => obs.disconnect();
   }, [to]);
   
   return (
     <div
       ref={ref}
-      className="rounded-2xl border border-white/10 px-4 sm:px-5 py-4 bg-white/5 backdrop-blur-sm text-center transform-gpu"
+      className="rounded-2xl border border-white/10 px-4 sm:px-5 py-4 bg-white/5 backdrop-blur-sm text-center"
     >
       <div className="text-2xl sm:text-3xl font-semibold">
         {val.toLocaleString()}
@@ -1153,39 +1225,40 @@ const CountUp = React.memo(function CountUp({ to, label }: { to: number; label: 
       <div className="text-white/70 text-xs sm:text-sm">{label}</div>
     </div>
   );
-});
+}
 
 /* =========================================================
    Unlock FX (optimized)
    =======================================================*/
-const UnlockFX = React.memo(function UnlockFX({ trigger }: { trigger: number }) {
+function UnlockFX({ trigger }: { trigger: number }) {
   const [active, setActive] = React.useState(false);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
   React.useEffect(() => {
     if (!trigger) return;
-    
     setActive(true);
+    
     const c = canvasRef.current;
     if (!c) return;
-    
     const ctx = c.getContext("2d");
     if (!ctx) return;
     
-  const dpr = Math.min(1.5, window.devicePixelRatio || 1);
-  let w = (c.width = Math.floor(window.innerWidth * dpr));
-  let h = (c.height = Math.floor(window.innerHeight * dpr));
-  c.style.width = window.innerWidth + "px";
-  c.style.height = window.innerHeight + "px";
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Lower resolution for FX canvas
+    const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+    let w = (c.width = window.innerWidth * dpr);
+    let h = (c.height = window.innerHeight * dpr);
+    c.style.width = window.innerWidth + "px";
+    c.style.height = window.innerHeight + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const isFine = window.matchMedia && window.matchMedia("(pointer: fine)").matches;
-  const particles = Array.from({ length: isFine ? 60 : 40 }, () => {
+    // Fewer particles for better performance
+    const particleCount = window.innerWidth < 768 ? 30 : 45;
+    const particles = Array.from({ length: particleCount }, () => {
       const ang = Math.random() * Math.PI * 2;
       const spd = 18 + Math.random() * 22;
       return {
-        x: w / 2,
-        y: h / 2,
+        x: w / (2 * dpr),
+        y: h / (2 * dpr),
         vx: Math.cos(ang) * spd,
         vy: Math.sin(ang) * spd,
         life: 0,
@@ -1194,12 +1267,13 @@ const UnlockFX = React.memo(function UnlockFX({ trigger }: { trigger: number }) 
       };
     });
 
-  const sparkles = Array.from({ length: isFine ? 18 : 12 }, () => {
+    const sparkleCount = window.innerWidth < 768 ? 8 : 14;
+    const sparkles = Array.from({ length: sparkleCount }, () => {
       const ang = Math.random() * Math.PI * 2;
       const spd = 30 + Math.random() * 40;
       return {
-        x: w / 2,
-        y: h / 2,
+        x: w / (2 * dpr),
+        y: h / (2 * dpr),
         vx: Math.cos(ang) * spd,
         vy: Math.sin(ang) * spd,
         life: 0,
@@ -1209,22 +1283,24 @@ const UnlockFX = React.memo(function UnlockFX({ trigger }: { trigger: number }) 
 
     let raf: number;
     const tick = () => {
-      ctx.clearRect(0, 0, w, h);
+      ctx.clearRect(0, 0, w / dpr, h / dpr);
       ctx.globalCompositeOperation = "lighter";
       
-      // Draw multi-layered aurora burst
-      for (let i = 0; i < 3; i++) {
+      // Simplified aurora burst layers
+      const layerCount = window.innerWidth < 768 ? 2 : 3;
+      for (let i = 0; i < layerCount; i++) {
         ctx.save();
         ctx.globalAlpha = 0.18 - i * 0.05;
-        ctx.filter = `blur(${60 - i * 20}px)`;
+        const blurAmount = window.innerWidth < 768 ? 40 - i * 15 : 60 - i * 20;
+        ctx.filter = `blur(${blurAmount}px)`;
         ctx.beginPath();
-        ctx.arc(w/2, h/2, 220 + i*80, 0, Math.PI*2);
+        ctx.arc(w/(2*dpr), h/(2*dpr), 220 + i*80, 0, Math.PI*2);
         ctx.fillStyle = `rgba(${108 + i*40},${164 + i*20},255,1)`;
         ctx.fill();
         ctx.restore();
       }
       
-      // Draw glowing particles
+      // Draw particles with reduced blur
       for (const p of particles) {
         p.x += p.vx;
         p.y += p.vy;
@@ -1232,17 +1308,19 @@ const UnlockFX = React.memo(function UnlockFX({ trigger }: { trigger: number }) 
         p.vy *= 0.96;
         p.life++;
         const a = Math.max(0, 1 - p.life / p.max);
-        ctx.save();
-        ctx.globalAlpha = 0.7 * a;
-        ctx.filter = "blur(6px)";
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 8 + (1 - a) * 8, 0, Math.PI * 2);
-        ctx.fillStyle = p.color;
-        ctx.fill();
-        ctx.restore();
+        if (a > 0.1) {
+          ctx.save();
+          ctx.globalAlpha = 0.7 * a;
+          ctx.filter = `blur(${window.innerWidth < 768 ? 4 : 6}px)`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 8 + (1 - a) * 8, 0, Math.PI * 2);
+          ctx.fillStyle = p.color;
+          ctx.fill();
+          ctx.restore();
+        }
       }
       
-      // Draw sparkles
+      // Draw sparkles with minimal blur
       for (const s of sparkles) {
         s.x += s.vx;
         s.y += s.vy;
@@ -1250,18 +1328,19 @@ const UnlockFX = React.memo(function UnlockFX({ trigger }: { trigger: number }) 
         s.vy *= 0.93;
         s.life++;
         const a = Math.max(0, 1 - s.life / s.max);
-        ctx.save();
-        ctx.globalAlpha = 0.8 * a;
-        ctx.filter = "blur(1px)";
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, 2 + (1 - a) * 2, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255,255,255,1)`;
-        ctx.shadowColor = '#BA89FF';
-        ctx.shadowBlur = 16;
-        ctx.fill();
-        ctx.restore();
+        if (a > 0.1) {
+          ctx.save();
+          ctx.globalAlpha = 0.8 * a;
+          ctx.filter = "blur(1px)";
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, 2 + (1 - a) * 2, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,1)`;
+          ctx.shadowColor = '#BA89FF';
+          ctx.shadowBlur = 16;
+          ctx.fill();
+          ctx.restore();
+        }
       }
-      
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -1278,16 +1357,9 @@ const UnlockFX = React.memo(function UnlockFX({ trigger }: { trigger: number }) 
   }, [trigger]);
 
   if (!active) return null;
-  
   return (
     <div className="fixed inset-0 z-[35] pointer-events-none">
-      <div
-        className="absolute inset-0"
-        style={{
-          background: "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.45), rgba(186,137,255,0.22) 30%, rgba(255,168,94,0.12) 50%, rgba(255,255,255,0) 80%)",
-          animation: "flashFade 1400ms ease-out forwards",
-        }}
-      />
+  {/* decorative radial removed */}
       <div
         className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full"
         style={{
@@ -1300,24 +1372,7 @@ const UnlockFX = React.memo(function UnlockFX({ trigger }: { trigger: number }) 
           filter: "blur(0.5px) brightness(1.2)",
         }}
       >
-        {[...Array(12)].map((_, i) => (
-          <div
-            key={i}
-            style={{
-              position: "absolute",
-              left: `${80 + Math.cos((i/12)*2*Math.PI)*70}px`,
-              top: `${80 + Math.sin((i/12)*2*Math.PI)*70}px`,
-              width: "12px",
-              height: "12px",
-              borderRadius: "50%",
-              background: "radial-gradient(circle, #fff 60%, #BA89FF 100%)",
-              boxShadow: "0 0 16px 8px #BA89FF88, 0 0 32px 16px #6CA4FF44",
-              opacity: 0.7,
-              pointerEvents: "none",
-              animation: `sparkleFade 1800ms cubic-bezier(.4,.8,.3,1) ${i*120}ms forwards`,
-            }}
-          />
-        ))}
+  {/* sparkle dots removed */}
         <style>{`
           @keyframes sparkleFade {
             0% { opacity: 1; transform: scale(1); }
@@ -1333,12 +1388,12 @@ const UnlockFX = React.memo(function UnlockFX({ trigger }: { trigger: number }) 
       `}</style>
     </div>
   );
-});
+}
 
 /* =========================================================
-   Contact Form (optimized)
+   Contact Form
    =======================================================*/
-const ContactForm = React.memo(function ContactForm() {
+function ContactForm() {
   type FormState = {
     name: string;
     email: string;
@@ -1352,7 +1407,7 @@ const ContactForm = React.memo(function ContactForm() {
     message: string;
     honey: string;
   };
-
+  
   const ids = React.useMemo(() => ({
     name: "cf_name",
     email: "cf_email",
@@ -1397,55 +1452,78 @@ const ContactForm = React.memo(function ContactForm() {
   const [status, setStatus] = React.useState<"idle" | "sending" | "sent" | "error">("idle");
   const [globalMsg, setGlobalMsg] = React.useState<string>("");
 
-  const validEmail = React.useCallback((v: string) => /[^@\s]+@[^@\s]+\.[^@\s]+/.test(v.trim()), []);
-  const required = React.useCallback((v: string) => v.trim().length > 0, []);
+  const validEmail = (v: string) => /[^@\s]+@[^@\s]+\.[^@\s]+/.test(v.trim());
+  const required = (v: string) => v.trim().length > 0;
 
-  const formatTN = React.useCallback((v: string) => {
+  const formatTN = (v: string) => {
     const digits = v.replace(/\D/g, "").slice(0, 12);
     if (digits.startsWith("216")) {
       const rest = digits.slice(3);
-      return "+216 " + rest.replace(/(\d{2})(\d{3})(\d{3})?/, (_m, a, b, c) => [a, b, c].filter(Boolean).join(" "));
+      return (
+        "+216 " +
+        rest.replace(
+          /(\d{2})(\d{3})(\d{3})?/,
+          (_m, a, b, c) => [a, b, c].filter(Boolean).join(" ")
+        )
+      );
     }
     if (digits.startsWith("00216")) {
       const rest = digits.slice(5);
-      return "+216 " + rest.replace(/(\d{2})(\d{3})(\d{3})?/, (_m, a, b, c) => [a, b, c].filter(Boolean).join(" "));
+      return (
+        "+216 " +
+        rest.replace(
+          /(\d{2})(\d{3})(\d{3})?/,
+          (_m, a, b, c) => [a, b, c].filter(Boolean).join(" ")
+        )
+      );
     }
     if (v.startsWith("+")) return "+" + digits;
     return digits;
-  }, []);
+  };
 
-  const onField = React.useCallback(<K extends keyof FormState>(k: K) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      const raw = e.target.value ?? "";
-      const v = k === "phone" ? formatTN(raw) : raw;
-      setForm((s) => ({ ...s, [k]: v }));
-    }, [formatTN]);
+  const onField = <K extends keyof FormState>(k: K) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const raw = e.currentTarget?.value ?? "";
+    const v = k === "phone" ? formatTN(raw) : raw;
+    setForm((s) => ({ ...s, [k]: v }));
+  };
 
-  const onBlur = React.useCallback(<K extends keyof FormState>(k: K) => () =>
-    setTouched((t) => ({ ...t, [k]: true })), []);
+  const onBlur = <K extends keyof FormState>(k: K) => () =>
+    setTouched((t) => ({ ...t, [k]: true }));
 
-  const errorFor = React.useCallback((k: keyof FormState): string | null => {
-    if (k === "name" && touched.name && !required(form.name)) return "Name is required";
-    if (k === "email" && touched.email && !validEmail(form.email)) return "Enter a valid email";
-    if (k === "message" && touched.message && !required(form.message)) return "Tell us a few details";
+  const errorFor = (k: keyof FormState): string | null => {
+    if (k === "name" && touched.name && !required(form.name))
+      return "Name is required";
+    if (k === "email" && touched.email && !validEmail(form.email))
+      return "Enter a valid email";
+    if (k === "message" && touched.message && !required(form.message))
+      return "Tell us a few details";
     return null;
-  }, [touched, form, required, validEmail]);
+  };
 
-  const hasError = React.useCallback((k: keyof FormState) => Boolean(errorFor(k)), [errorFor]);
-  const isOK = React.useCallback((k: keyof FormState) =>
-    touched[k] && !hasError(k) && required((form[k] as string) ?? ""), [touched, hasError, required, form]);
+  const hasError = (k: keyof FormState) => Boolean(errorFor(k));
+  const isOK = (k: keyof FormState) =>
+    touched[k] && !hasError(k) && required((form[k] as string) ?? "");
 
   const leftChars = 1200 - form.message.length;
   const messageTooLong = form.message.length > 1200;
 
-  const onSubmit = React.useCallback(async (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched((t) => ({ ...t, name: true, email: true, message: true }));
     if (form.honey) return;
 
-    if (!required(form.name) || !validEmail(form.email) || !required(form.message) || messageTooLong) {
+    if (
+      !required(form.name) ||
+      !validEmail(form.email) ||
+      !required(form.message) ||
+      messageTooLong
+    ) {
       setStatus("error");
-      setGlobalMsg(messageTooLong ? "Your message is a bit long — please shorten it." : "Please fix the highlighted fields.");
+      setGlobalMsg(
+        messageTooLong
+          ? "Your message is a bit long — please shorten it."
+          : "Please fix the highlighted fields."
+      );
       return;
     }
 
@@ -1456,21 +1534,43 @@ const ContactForm = React.memo(function ContactForm() {
       const res = await fetch("/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, _timestamp: new Date().toISOString() }),
+        body: JSON.stringify({
+          ...form,
+          _timestamp: new Date().toISOString(),
+        }),
       });
       if (!res.ok) throw new Error("bad status");
       setStatus("sent");
-      setGlobalMsg("Thanks! We'll reply within 48h with a venue short-list & draft budget.");
+      setGlobalMsg(
+        "Thanks! We'll reply within 48h with a venue short-list & draft budget."
+      );
     } catch {
-      const subject = encodeURIComponent(`Event inquiry from ${form.name} — ${form.city || ""}`);
-      const body = encodeURIComponent(`Name: ${form.name}\nEmail: ${form.email}\nPhone: ${form.phone}\nCity: ${form.city}\nDates: ${form.dates}\nHeadcount: ${form.headcount}\nRooms/night: ${form.rooms}\nBudget: ${form.budget}\nAV: ${form.av}\n\nMessage:\n${form.message}\n\nSent via starwaves.tn`);
+      const subject = encodeURIComponent(
+        `Event inquiry from ${form.name} — ${form.city || ""}`
+      );
+      const body = encodeURIComponent(
+        `Name: ${form.name}
+Email: ${form.email}
+Phone: ${form.phone}
+City: ${form.city}
+Dates: ${form.dates}
+Headcount: ${form.headcount}
+Rooms/night: ${form.rooms}
+Budget: ${form.budget}
+AV: ${form.av}
+
+Message:
+${form.message}
+
+Sent via starwaves.tn`
+      );
       window.location.href = `mailto:hello@starwaves.tn?subject=${subject}&body=${body}`;
       setStatus("sent");
       setGlobalMsg("Thanks! Your email client should open with the details.");
     }
-  }, [form, required, validEmail, messageTooLong]);
+  };
 
-  const Field = React.memo(function Field({
+  const Field = ({
     label,
     name,
     requiredField,
@@ -1486,39 +1586,39 @@ const ContactForm = React.memo(function ContactForm() {
     ok?: boolean;
     error?: string | null;
     children: React.ReactNode;
-  }) {
-    return (
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <label htmlFor={name} className="text-xs text-white/70">
-            {label}{" "}
-            {requiredField ? <span className="text-white/40">(required)</span> : null}
-          </label>
-          <div className="h-5">
-            {ok ? (
-              <Check className="w-4 h-4 text-emerald-400" />
-            ) : error ? (
-              <XCircle className="w-4 h-4 text-rose-300" />
-            ) : null}
-          </div>
-        </div>
-        {children}
-        <div className="min-h-[1rem] text-[11px] leading-4">
-          {error ? (
-            <span className="text-rose-300">{error}</span>
-          ) : hint ? (
-            <span className="text-white/50">{hint}</span>
+  }) => (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label htmlFor={name} className="text-xs text-white/70">
+          {label}{" "}
+          {requiredField ? (
+            <span className="text-white/40">(required)</span>
+          ) : null}
+        </label>
+        <div className="h-5">
+          {ok ? (
+            <Check className="w-4 h-4 text-emerald-400" />
+          ) : error ? (
+            <XCircle className="w-4 h-4 text-rose-300" />
           ) : null}
         </div>
       </div>
-    );
-  });
+      {children}
+      <div className="min-h-[1rem] text-[11px] leading-4">
+        {error ? (
+          <span className="text-rose-300">{error}</span>
+        ) : hint ? (
+          <span className="text-white/50">{hint}</span>
+        ) : null}
+      </div>
+    </div>
+  );
 
   return (
     <form
       id="contact-form"
       onSubmit={onSubmit}
-      className="relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-5 sm:p-6 md:p-8 text-left transform-gpu"
+      className="relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-5 sm:p-6 md:p-8 text-left"
       noValidate
     >
       <div className="sr-only" aria-live="polite">
@@ -1540,13 +1640,21 @@ const ContactForm = React.memo(function ContactForm() {
         <div className="absolute inset-0 z-10 grid place-items-center rounded-2xl bg-black/60 text-center p-8">
           <div>
             <div className="text-2xl font-semibold mb-2">Thank you!</div>
-            <p className="text-white/80">{globalMsg || "We'll be in touch shortly."}</p>
+            <p className="text-white/80">
+              {globalMsg || "We'll be in touch shortly."}
+            </p>
           </div>
         </div>
       )}
 
       <div className="grid md:grid-cols-2 gap-5">
-        <Field label="Name" name="name" requiredField ok={isOK("name")} error={errorFor("name")}>
+        <Field
+          label="Name"
+          name="name"
+          requiredField
+          ok={isOK("name")}
+          error={errorFor("name")}
+        >
           <input
             id="name"
             name="name"
@@ -1555,12 +1663,18 @@ const ContactForm = React.memo(function ContactForm() {
             onChange={onField("name")}
             onBlur={onBlur("name")}
             placeholder="Your full name"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-all"
             autoComplete="name"
           />
         </Field>
 
-        <Field label="Email" name="email" requiredField ok={isOK("email") && validEmail(form.email)} error={errorFor("email")}>
+        <Field
+          label="Email"
+          name="email"
+          requiredField
+          ok={isOK("email") && validEmail(form.email)}
+          error={errorFor("email")}
+        >
           <input
             id="email"
             name="email"
@@ -1570,7 +1684,7 @@ const ContactForm = React.memo(function ContactForm() {
             onChange={onField("email")}
             onBlur={onBlur("email")}
             placeholder="you@example.com"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-all"
             autoComplete="email"
           />
         </Field>
@@ -1583,7 +1697,7 @@ const ContactForm = React.memo(function ContactForm() {
             onChange={onField("phone")}
             onBlur={onBlur("phone")}
             placeholder="+216 12 345 678"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-all"
             autoComplete="tel"
             inputMode="tel"
           />
@@ -1597,7 +1711,7 @@ const ContactForm = React.memo(function ContactForm() {
             onChange={onField("city")}
             onBlur={onBlur("city")}
             placeholder="Tunis, Hammamet, Sousse..."
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-all"
             autoComplete="address-level2"
           />
         </Field>
@@ -1610,7 +1724,7 @@ const ContactForm = React.memo(function ContactForm() {
             onChange={onField("dates")}
             onBlur={onBlur("dates")}
             placeholder="e.g., 12–14 Oct 2025"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-all"
           />
         </Field>
 
@@ -1622,7 +1736,7 @@ const ContactForm = React.memo(function ContactForm() {
             onChange={onField("headcount")}
             onBlur={onBlur("headcount")}
             placeholder="e.g., 400"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-all"
             inputMode="numeric"
           />
         </Field>
@@ -1635,7 +1749,7 @@ const ContactForm = React.memo(function ContactForm() {
             onChange={onField("rooms")}
             onBlur={onBlur("rooms")}
             placeholder="e.g., 120"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-all"
             inputMode="numeric"
           />
         </Field>
@@ -1648,13 +1762,17 @@ const ContactForm = React.memo(function ContactForm() {
             onChange={onField("budget")}
             onBlur={onBlur("budget")}
             placeholder="e.g., 80,000 TND"
-            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
+            className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-all"
             inputMode="numeric"
           />
         </Field>
 
         <div className="md:col-span-2">
-          <Field label="AV / Stage needs" name="av" hint="LED / projection / streaming / translation…">
+          <Field
+            label="AV / Stage needs"
+            name="av"
+            hint="LED / projection / streaming / translation…"
+          >
             <input
               id="av"
               name="av"
@@ -1662,7 +1780,7 @@ const ContactForm = React.memo(function ContactForm() {
               onChange={onField("av")}
               onBlur={onBlur("av")}
               placeholder="LED / projection / streaming / translation..."
-              className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
+              className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-all"
             />
           </Field>
         </div>
@@ -1690,7 +1808,7 @@ const ContactForm = React.memo(function ContactForm() {
               onBlur={onBlur("message")}
               rows={6}
               placeholder="Tell us about your congress..."
-              className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-colors"
+              className="w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30 transition-all"
               maxLength={1400}
             />
             <div className="mt-1 text-[11px] text-white/50 text-right">
@@ -1711,7 +1829,7 @@ const ContactForm = React.memo(function ContactForm() {
           type="submit"
           disabled={status === "sending"}
           aria-busy={status === "sending"}
-          className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 transform-gpu"
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 transition-all"
         >
           {status === "sending" ? (
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -1726,17 +1844,17 @@ const ContactForm = React.memo(function ContactForm() {
       </div>
     </form>
   );
-});
+}
 
 /* =========================================================
-   Footer (memoized)
+   Footer
    =======================================================*/
-const Footer = React.memo(function Footer() {
+function Footer() {
   const scrollTo = useSmoothScroll();
-  const go = React.useCallback((id: string) => (e: React.MouseEvent) => {
+  const go = (id: string) => (e: React.MouseEvent) => {
     e.preventDefault();
     scrollTo(id);
-  }, [scrollTo]);
+  };
 
   return (
     <footer id="footer" className="relative z-10 mt-16 border-t border-white/10">
@@ -1760,21 +1878,21 @@ const Footer = React.memo(function Footer() {
                 target="_blank"
                 rel="noreferrer"
                 aria-label="Facebook"
-                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors transform-gpu"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
               >
                 <Facebook className="w-5 h-5" />
               </a>
               <a
                 href="#"
                 aria-label="Instagram"
-                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors transform-gpu"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
               >
                 <Instagram className="w-5 h-5" />
               </a>
               <a
                 href="#"
                 aria-label="LinkedIn"
-                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors transform-gpu"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
               >
                 <Linkedin className="w-5 h-5" />
               </a>
@@ -1785,22 +1903,38 @@ const Footer = React.memo(function Footer() {
             <h4 className="text-white font-semibold">About</h4>
             <ul className="mt-3 space-y-2 text-white/70 text-sm">
               <li>
-                <a href="#home" onClick={go("home")} className="hover:text-white transition-colors">
+                <a
+                  href="#home"
+                  onClick={go("home")}
+                  className="hover:text-white transition-colors"
+                >
                   Home
                 </a>
               </li>
               <li>
-                <a href="#about" onClick={go("about")} className="hover:text-white transition-colors">
+                <a
+                  href="#about"
+                  onClick={go("about")}
+                  className="hover:text-white transition-colors"
+                >
                   About
                 </a>
               </li>
               <li>
-                <a href="#work" onClick={go("work")} className="hover:text-white transition-colors">
+                <a
+                  href="#work"
+                  onClick={go("work")}
+                  className="hover:text-white transition-colors"
+                >
                   Work
                 </a>
               </li>
               <li>
-                <a href="#contact" onClick={go("contact")} className="hover:text-white transition-colors">
+                <a
+                  href="#contact"
+                  onClick={go("contact")}
+                  className="hover:text-white transition-colors"
+                >
                   Contact
                 </a>
               </li>
@@ -1811,32 +1945,56 @@ const Footer = React.memo(function Footer() {
             <h4 className="text-white font-semibold">Services</h4>
             <ul className="mt-3 space-y-2 text-white/70 text-sm">
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white transition-colors"
+                >
                   Hotel & Venue Brokerage
                 </a>
               </li>
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white transition-colors"
+                >
                   Production & AV
                 </a>
               </li>
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white transition-colors"
+                >
                   Print & Branding
                 </a>
               </li>
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white transition-colors"
+                >
                   Transport & Logistics
                 </a>
               </li>
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white transition-colors"
+                >
                   Media & Content
                 </a>
               </li>
               <li>
-                <a href="#services" onClick={go("services")} className="hover:text-white transition-colors">
+                <a
+                  href="#services"
+                  onClick={go("services")}
+                  className="hover:text-white transition-colors"
+                >
                   Experience Design
                 </a>
               </li>
@@ -1847,12 +2005,20 @@ const Footer = React.memo(function Footer() {
             <h4 className="text-white font-semibold">Support</h4>
             <ul className="mt-3 space-y-2 text-white/70 text-sm">
               <li>
-                <a href="#contact" onClick={go("contact")} className="hover:text-white transition-colors">
+                <a
+                  href="#contact"
+                  onClick={go("contact")}
+                  className="hover:text-white transition-colors"
+                >
                   Get a quote
                 </a>
               </li>
               <li>
-                <a href="#contact" onClick={go("contact")} className="hover:text-white transition-colors">
+                <a
+                  href="#contact"
+                  onClick={go("contact")}
+                  className="hover:text-white transition-colors"
+                >
                   Contact
                 </a>
               </li>
@@ -1879,16 +2045,16 @@ const Footer = React.memo(function Footer() {
       </div>
     </footer>
   );
-});
+}
 
 /* =========================================================
    App
    =======================================================*/
-const AnimatedHeadline = React.memo(function AnimatedHeadline() {
+function AnimatedHeadline() {
   const phrases = React.useMemo(
     () => [
       "we create worlds",
-      "we shape experiences", 
+      "we shape experiences",
       "we stage congresses",
       "we craft stories",
     ],
@@ -1899,9 +2065,9 @@ const AnimatedHeadline = React.memo(function AnimatedHeadline() {
       <TypeCycle phrases={phrases} />
     </span>
   );
-});
+}
 
-const TypeCycle = React.memo(function TypeCycle({
+function TypeCycle({
   phrases,
   typingSpeed = 70,
   deletingSpeed = 45,
@@ -1917,7 +2083,6 @@ const TypeCycle = React.memo(function TypeCycle({
   const [text, setText] = React.useState("");
   const [i, setI] = React.useState(0);
   const [del, setDel] = React.useState(false);
-  
   const longest = React.useMemo(
     () => phrases.reduce((m, p) => Math.max(m, p.length), 0),
     [phrases]
@@ -1933,7 +2098,10 @@ const TypeCycle = React.memo(function TypeCycle({
 
     if (!del) {
       if (!done)
-        t = window.setTimeout(() => setText(current.slice(0, text.length + 1)), d(typingSpeed));
+        t = window.setTimeout(
+          () => setText(current.slice(0, text.length + 1)),
+          d(typingSpeed)
+        );
       else t = window.setTimeout(() => setDel(true), pause);
     } else {
       if (!empty)
@@ -1957,7 +2125,7 @@ const TypeCycle = React.memo(function TypeCycle({
       <span className="ml-1 w-[2px] h-[1em] bg-white/80 animate-pulse" />
     </span>
   );
-});
+}
 
 export default function App() {
   const scrollTo = useSmoothScroll();
@@ -1978,15 +2146,12 @@ export default function App() {
     }, 900);
   }, [unlocking, scrollTo]);
 
-  const onQuote = React.useCallback(() => runUnlock("contact"), [runUnlock]);
-
   return (
     <div className="relative min-h-screen text-white overflow-x-hidden bg-[#06070B]">
       <AuroraBackground ref={auroraRef} />
       <ScrollProgressBar />
       <Nav />
-      <CTADock onQuote={onQuote} />
-      
+      <CTADock onQuote={() => runUnlock("contact")} />
       <main className="relative z-10">
         {/* HERO */}
         <section
@@ -2022,14 +2187,14 @@ export default function App() {
                 <button
                   ref={mag1}
                   onClick={() => runUnlock("services")}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-white text-black font-semibold hover:opacity-90 transform-gpu transition-opacity"
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-white text-black font-semibold hover:opacity-90 transition-all will-change-transform"
                 >
                   Explore services <ArrowRight className="w-4 h-4" />
                 </button>
                 <button
                   ref={mag2}
                   onClick={() => runUnlock("contact")}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90 transform-gpu transition-opacity"
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90 transition-all will-change-transform"
                 >
                   Get a quote <Mail className="w-4 h-4" />
                 </button>
@@ -2143,8 +2308,10 @@ export default function App() {
             <div
               className="relative overflow-hidden group"
               style={{
-                WebkitMaskImage: "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
-                maskImage: "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
+                WebkitMaskImage:
+                  "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
+                maskImage:
+                  "linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent)",
               }}
             >
               <div className="flex gap-16 items-center animate-[marq_35s_linear_infinite] group-hover:[animation-play-state:paused]">
@@ -2234,7 +2401,7 @@ export default function App() {
         <Section id="about">
           <div className="grid lg:grid-cols-2 gap-8">
             <Reveal>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-8 transform-gpu">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-8">
                 <h3 className="text-xl font-semibold">Why Starwaves</h3>
                 <p className="mt-3 text-white/80">
                   We run congresses like productions: one schedule, one budget,
@@ -2260,7 +2427,7 @@ export default function App() {
             </Reveal>
 
             <Reveal delay={80}>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-8 transform-gpu">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-6 md:p-8">
                 <h3 className="text-xl font-semibold">At a glance</h3>
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <div className="rounded-xl border border-white/10 bg-black/20 p-4">
@@ -2301,7 +2468,7 @@ export default function App() {
                   reply with a venue short-list and draft budget.
                 </p>
 
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 transform-gpu">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="flex items-center gap-2 text-white/80">
                     <Phone className="w-4 h-4" /> +216 12 345 678
                   </div>
