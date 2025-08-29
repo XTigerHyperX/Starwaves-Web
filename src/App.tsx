@@ -2,6 +2,12 @@ import React from "react";
 import { ArrowRight, Facebook, Instagram, Linkedin, Mail, Phone, MapPin, Play, Send } from "lucide-react";
 import "./index.css";
 
+// If you actually have a stylesheet, you can re-enable the line below.
+// import "./index.css";
+
+/**************************
+ *  Aurora Canvas Background (JS version + strong burst API)
+ **************************/
 const AuroraBackground = React.forwardRef(function AuroraBackground(_, ref) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const scrollRef = React.useRef(0);
@@ -910,7 +916,9 @@ function UnlockFX({ trigger }: { trigger: number }) {
   );
 }
 
-
+/**************************
+ *  Contact Form (no-backend fallback via mailto)
+ **************************/
 function ContactForm() {
   const [form, setForm] = React.useState({
     name: "",
@@ -943,6 +951,7 @@ function ContactForm() {
     }
     setStatus("sending");
 
+    // Try POST /api/contact if you wire a backend; otherwise fallback to mailto
     try {
       const res = await fetch("/api/contact", {
         method: "POST",
