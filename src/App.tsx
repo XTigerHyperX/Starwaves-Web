@@ -920,7 +920,21 @@ function UnlockFX({ trigger }: { trigger: number }) {
  *  Contact Form (no-backend fallback via mailto)
  **************************/
 function ContactForm() {
-  const [form, setForm] = React.useState({
+  type FormState = {
+    name: string;
+    email: string;
+    phone: string;
+    city: string;
+    dates: string;
+    headcount: string;
+    rooms: string;
+    budget: string;
+    av: string;
+    message: string;
+    honey: string;
+  };
+
+  const [form, setForm] = React.useState<FormState>({
     name: "",
     email: "",
     phone: "",
@@ -933,12 +947,19 @@ function ContactForm() {
     message: "",
     honey: "",
   });
+
   const [status, setStatus] = React.useState<"idle" | "sending" | "sent" | "error">("idle");
 
-  const update =
-    (k: keyof typeof form) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-      setForm((s) => ({ ...s, [k]: e.currentTarget.value }));
+  // SAFER onChange: copy the value immediately; never read from a possibly-null event later
+  const onField =
+    <K extends keyof FormState>(k: K) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      // copy the value synchronously
+      const v =
+        (e.currentTarget && (e.currentTarget as HTMLInputElement | HTMLTextAreaElement).value) ??
+        ((e.target as HTMLInputElement | HTMLTextAreaElement | null)?.value ?? "");
+      setForm((s) => ({ ...s, [k]: v }));
+    };
 
   const validEmail = (v: string) => /[^@\s]+@[^@\s]+\.[^@\s]+/.test(v);
 
@@ -951,7 +972,6 @@ function ContactForm() {
     }
     setStatus("sending");
 
-    // Try POST /api/contact if you wire a backend; otherwise fallback to mailto
     try {
       const res = await fetch("/api/contact", {
         method: "POST",
@@ -987,9 +1007,22 @@ Sent via starwaves.tn`
   };
 
   return (
-    <form id="contact-form" onSubmit={onSubmit} className="relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-5 sm:p-6 md:p-8 text-left">
+    <form
+      id="contact-form"
+      onSubmit={onSubmit}
+      className="relative rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-5 sm:p-6 md:p-8 text-left backdrop-heavy"
+    >
       {/* honeypot */}
-      <input type="text" value={form.honey} onChange={update("honey")} className="hidden" tabIndex={-1} aria-hidden />
+      <input
+        type="text"
+        name="company" // make bots more likely to fill this
+        value={form.honey}
+        onChange={onField("honey")}
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden
+        autoComplete="off"
+      />
 
       {status === "sent" && (
         <div className="absolute inset-0 z-10 grid place-items-center rounded-2xl bg-black/70 text-center p-8">
@@ -1003,48 +1036,124 @@ Sent via starwaves.tn`
       <div className="grid md:grid-cols-2 gap-4">
         <div>
           <label className="text-xs text-white/70">Name</label>
-          <input required value={form.name} onChange={update("name")} placeholder="Your full name" className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30" />
+          <input
+            required
+            name="name"
+            value={form.name}
+            onChange={onField("name")}
+            placeholder="Your full name"
+            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            autoComplete="name"
+          />
         </div>
         <div>
           <label className="text-xs text-white/70">Email</label>
-          <input required type="email" value={form.email} onChange={update("email")} placeholder="you@example.com" className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30" />
+          <input
+            required
+            type="email"
+            name="email"
+            value={form.email}
+            onChange={onField("email")}
+            placeholder="you@example.com"
+            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            autoComplete="email"
+          />
         </div>
         <div>
           <label className="text-xs text-white/70">Phone</label>
-          <input value={form.phone} onChange={update("phone")} placeholder="+216 ..." className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30" />
+          <input
+            name="phone"
+            value={form.phone}
+            onChange={onField("phone")}
+            placeholder="+216 ..."
+            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            autoComplete="tel"
+          />
         </div>
         <div>
           <label className="text-xs text-white/70">City</label>
-          <input value={form.city} onChange={update("city")} placeholder="Tunis, Hammamet, Sousse..." className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30" />
+          <input
+            name="city"
+            value={form.city}
+            onChange={onField("city")}
+            placeholder="Tunis, Hammamet, Sousse..."
+            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            autoComplete="address-level2"
+          />
         </div>
         <div>
           <label className="text-xs text-white/70">Dates</label>
-          <input value={form.dates} onChange={update("dates")} placeholder="e.g., 12–14 Oct 2025" className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30" />
+          <input
+            name="dates"
+            value={form.dates}
+            onChange={onField("dates")}
+            placeholder="e.g., 12–14 Oct 2025"
+            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+          />
         </div>
         <div>
           <label className="text-xs text-white/70">Headcount</label>
-          <input value={form.headcount} onChange={update("headcount")} placeholder="e.g., 400" className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30" />
+          <input
+            name="headcount"
+            value={form.headcount}
+            onChange={onField("headcount")}
+            placeholder="e.g., 400"
+            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            inputMode="numeric"
+          />
         </div>
         <div>
           <label className="text-xs text-white/70">Rooms / night</label>
-          <input value={form.rooms} onChange={update("rooms")} placeholder="e.g., 120" className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30" />
+          <input
+            name="rooms"
+            value={form.rooms}
+            onChange={onField("rooms")}
+            placeholder="e.g., 120"
+            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            inputMode="numeric"
+          />
         </div>
         <div>
           <label className="text-xs text-white/70">Budget</label>
-          <input value={form.budget} onChange={update("budget")} placeholder="e.g., 80,000 TND" className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30" />
+          <input
+            name="budget"
+            value={form.budget}
+            onChange={onField("budget")}
+            placeholder="e.g., 80,000 TND"
+            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+            inputMode="numeric"
+          />
         </div>
         <div className="md:col-span-2">
           <label className="text-xs text-white/70">AV / Stage needs</label>
-          <input value={form.av} onChange={update("av")} placeholder="LED / projection / streaming / translation..." className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30" />
+          <input
+            name="av"
+            value={form.av}
+            onChange={onField("av")}
+            placeholder="LED / projection / streaming / translation..."
+            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+          />
         </div>
         <div className="md:col-span-2">
           <label className="text-xs text-white/70">Message</label>
-          <textarea required value={form.message} onChange={update("message")} rows={6} placeholder="Tell us about your congress..." className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30" />
+          <textarea
+            required
+            name="message"
+            value={form.message}
+            onChange={onField("message")}
+            rows={6}
+            placeholder="Tell us about your congress..."
+            className="mt-1 w-full rounded-xl bg-black/30 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-white/30"
+          />
         </div>
       </div>
 
       <div className="mt-5 flex flex-col sm:flex-row items-start sm:items-center gap-3">
-        <button disabled={status === "sending"} className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90 disabled:opacity-60">
+        <button
+          type="submit"
+          disabled={status === "sending"}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-gradient-to-r from-[#6CA4FF] via-[#BA89FF] to-[#FFA85E] text-black font-semibold hover:opacity-90 disabled:opacity-60"
+        >
           <Send className="w-5 h-5" /> {status === "sending" ? "Sending..." : "Send message"}
         </button>
         {status === "error" && <span className="text-sm text-rose-300">Fill name, valid email, and message.</span>}
@@ -1052,6 +1161,7 @@ Sent via starwaves.tn`
     </form>
   );
 }
+
 
 function Footer() {
   const scrollTo = useSmoothScroll();
