@@ -1,4 +1,5 @@
 import React from "react";
+import "../services-page.js";
 import { motion } from "framer-motion";
 import { Section, Container } from "../components/layout/Layout";
 import { Reveal } from "../components/common/Reveal";
@@ -8,6 +9,7 @@ import { Modal } from "../components/common/Modal";
 import { Building2, MonitorSpeaker, Printer, Bus, Video, Palette, ArrowRight, Download, Mail, Phone, CheckCircle2, Shield, BookOpen, Layers, Activity, ListChecks, CalendarClock, UsersRound, Files, Sparkles } from "lucide-react";
 import { track } from "../lib/analytics";
 import { PARTNER_LOGOS } from "../content";
+import HeroCinematic from "../components/services/HeroCinematic";
 
 type BandItem = { label: string; tag?: string };
 type ServiceFull = {
@@ -216,35 +218,13 @@ export default function ServicesPage() {
   }, []);
 
   return (
-    <div className="services-theme">
+    <div className="services services-theme">
       <div className="theme-content">
-        {/* Hero */}
-  <Section id="overview" className="!pb-12 sm:!pb-16 md:!pb-20">
-          <Container>
-            <Reveal>
-              <div className="max-w-4xl mx-auto text-center">
-                <h1 className="text-3xl sm:text-5xl md:text-6xl font-semibold leading-tight">We create full‑stack event experiences that feel inevitable.</h1>
-                <p className="mt-4 text-white/80 max-w-2xl mx-auto">Venue brokerage, AV & production, print/branding, transport & logistics, media & content, and experience design.</p>
-                <div className="mt-5 flex flex-col sm:flex-row items-center justify-center gap-3">
-                  <button onClick={() => { track('service_quote_click'); window.dispatchEvent(new CustomEvent('starwaves:unlock', { detail: { mode:'nav', path:'/contact' } })); }} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full sw-cta font-semibold">Get a quote <ArrowRight className="w-4 h-4"/></button>
-                  <a href="/contact" onClick={() => track('consult_click')} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/5 text-sw-ink border border-sw-border hover:bg-white/10">Book a 15‑min Consult</a>
-                  <a href="/services/briefs/placeholder.pdf" onClick={() => track('download_brief')} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/5 text-sw-ink border border-sw-border hover:bg-white/10">Download Services Brief <Download className="w-4 h-4"/></a>
-                </div>
-                <div className="mt-6 flex items-center justify-center gap-2 flex-wrap text-sm">
-                  <span className="text-white/70">What do you need help with?</span>
-                  <div className="chips-nav">
-                    {['brokerage','production','print','transport','media','experience'].map(id => (
-                      <a key={id} href={`#${id}`} className="pill">{id.charAt(0).toUpperCase()+id.slice(1)}</a>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </Reveal>
-          </Container>
-        </Section>
+  {/* Cinematic hero + proof */}
+  <HeroCinematic />
 
         {/* Services overview quick grid and left TOC */}
-  <Section className="pt-0 !pb-12 sm:!pb-16 md:!pb-20">
+  <Section className="pt-0 !pb-12">
           <Container>
             <Reveal>
               <div className="grid lg:grid-cols-[220px,1fr] gap-5">
@@ -284,7 +264,7 @@ export default function ServicesPage() {
 
         {/* Full service sections, all details visible */}
         {SERVICES_FULL.map((svc, idx) => (
-          <Section key={svc.id} id={svc.id} className="!py-10 sm:!py-14 md:!py-16">
+          <Section key={svc.id} id={svc.id} className="!py-12">
             <Container>
               <div className="max-w-[1200px] md:max-w-[1280px] mx-auto">
                 <div className="grid gap-5 md:grid-cols-[minmax(260px,_0.28fr)_1fr]">
@@ -293,7 +273,7 @@ export default function ServicesPage() {
                   <div className="grad-ring rounded-2xl">
                     <div className="bg-white/5 p-5 h-full shadow-sm transition-transform hover:scale-[1.01] hover:shadow-md border border-white/10 rounded-[14px] md:rounded-[16px]">
                     <div className="flex items-center gap-2">
-                      <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center">{svc.icon}</div>
+                      <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center icon-wiggle">{svc.icon}</div>
                       <h3 className="text-[20px] font-semibold">{svc.title}</h3>
                     </div>
                     <div className="mt-2 text-white/80 line-clamp-2">{svc.promise}</div>
@@ -302,7 +282,16 @@ export default function ServicesPage() {
                     </ul>
                     {svc.glance?.length ? (
                       <div className="mt-3 flex flex-wrap gap-2">
-                        {svc.glance.map(g => <span key={g} className="pill text-xs">{g}</span>)}
+                        {svc.glance.slice(0,2).map(g => {
+                          const [label, ...rest] = g.split(' ');
+                          const value = rest.join(' ');
+                          return (
+                            <span key={g} className="pill text-xs">
+                              <span className="text-white/70 mr-1">{label}</span>
+                              <span className="sw-text-hero">{value}</span>
+                            </span>
+                          );
+                        })}
                       </div>
                     ) : null}
                     <div className="mt-4 flex gap-2">
@@ -316,7 +305,7 @@ export default function ServicesPage() {
                 <div className="space-y-3">
                   {/* Bands with staggered motion */}
                   <div className="grad-ring rounded-2xl">
-                  <motion.div initial={{opacity:0,y:8}} whileInView={{opacity:1,y:0}} viewport={{ once:true, amount:0.3 }} transition={{ duration:0.2, delay:0 }} className="bg-white/5 p-4 transition-transform hover:scale-[1.01] hover:shadow-md border border-white/10 rounded-[14px] md:rounded-[16px]">
+                  <motion.div initial={{opacity:0,y:8}} whileInView={{opacity:1,y:0}} viewport={{ once:true, amount:0.3 }} transition={{ duration:0.2, delay:0 }} className="bg-white/5 p-5 transition-transform hover:scale-[1.01] hover:shadow-md border border-white/10 rounded-[14px] md:rounded-[16px] band-hairline">
                     <div className="flex items-center gap-2 font-medium text-[18px]"><ListChecks className="w-4 h-4"/> Scope snapshot</div>
                     <ul className="mt-2 grid sm:grid-cols-2 gap-2 text-white/80 text-[15px] list-disc pl-5">
                       {svc.scope.map(x => <li key={x}>{x}</li>)}
@@ -325,7 +314,7 @@ export default function ServicesPage() {
                   </div>
 
                   <div className="grad-ring rounded-2xl">
-                  <motion.div initial={{opacity:0,y:8}} whileInView={{opacity:1,y:0}} viewport={{ once:true, amount:0.3 }} transition={{ duration:0.2, delay:0.05 }} className="bg-white/5 p-4 transition-transform hover:scale-[1.01] hover:shadow-md border border-white/10 rounded-[14px] md:rounded-[16px]">
+                  <motion.div initial={{opacity:0,y:8}} whileInView={{opacity:1,y:0}} viewport={{ once:true, amount:0.3 }} transition={{ duration:0.2, delay:0.05 }} className="bg-white/5 p-5 transition-transform hover:scale-[1.01] hover:shadow-md border border-white/10 rounded-[14px] md:rounded-[16px] band-hairline">
                     <div className="flex items-center gap-2 font-medium text-[18px]"><CalendarClock className="w-4 h-4"/> Sample timeline</div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {svc.timeline.map((t,i) => (
@@ -336,7 +325,7 @@ export default function ServicesPage() {
                   </div>
 
                   <div className="grad-ring rounded-2xl">
-                  <motion.div initial={{opacity:0,y:8}} whileInView={{opacity:1,y:0}} viewport={{ once:true, amount:0.3 }} transition={{ duration:0.2, delay:0.1 }} className="bg-white/5 p-4 transition-transform hover:scale-[1.01] hover:shadow-md border border-white/10 rounded-[14px] md:rounded-[16px]">
+                  <motion.div initial={{opacity:0,y:8}} whileInView={{opacity:1,y:0}} viewport={{ once:true, amount:0.3 }} transition={{ duration:0.2, delay:0.1 }} className="bg-white/5 p-5 transition-transform hover:scale-[1.01] hover:shadow-md border border-white/10 rounded-[14px] md:rounded-[16px] band-hairline">
                     <div className="flex items-center gap-2 font-medium text-[18px]"><UsersRound className="w-4 h-4"/> Team & roles</div>
                     <ul className="mt-2 grid sm:grid-cols-2 gap-2 text-white/80 text-[15px] list-disc pl-5">
                       {svc.team.map(t => <li key={t}>{t}</li>)}
@@ -345,7 +334,7 @@ export default function ServicesPage() {
                   </div>
 
                   <div className="grad-ring rounded-2xl">
-                  <motion.div initial={{opacity:0,y:8}} whileInView={{opacity:1,y:0}} viewport={{ once:true, amount:0.3 }} transition={{ duration:0.2, delay:0.15 }} className="bg-white/5 p-4 transition-transform hover:scale-[1.01] hover:shadow-md border border-white/10 rounded-[14px] md:rounded-[16px]">
+                  <motion.div initial={{opacity:0,y:8}} whileInView={{opacity:1,y:0}} viewport={{ once:true, amount:0.3 }} transition={{ duration:0.2, delay:0.15 }} className="bg-white/5 p-5 transition-transform hover:scale-[1.01] hover:shadow-md border border-white/10 rounded-[14px] md:rounded-[16px] band-hairline">
                     <div className="flex items-center gap-2 font-medium text-[18px]"><Files className="w-4 h-4"/> Deliverables</div>
                     <ul className="mt-2 grid sm:grid-cols-2 gap-2 text-white/80 text-[15px]">
                       {svc.deliverables.map(d => {
@@ -364,22 +353,22 @@ export default function ServicesPage() {
                   </div>
 
                   <div className="grad-ring rounded-2xl">
-                  <motion.div initial={{opacity:0,y:8}} whileInView={{opacity:1,y:0}} viewport={{ once:true, amount:0.3 }} transition={{ duration:0.2, delay:0.2 }} className="bg-white/5 p-4 transition-transform hover:scale-[1.01] hover:shadow-md border border-white/10 rounded-[14px] md:rounded-[16px]">
-                    <div className="flex items-center gap-2 font-medium text-[18px]"><Sparkles className="w-4 h-4"/> Case & quote</div>
-                    <div className="mt-2 grid sm:grid-cols-[160px,1fr] gap-3 items-center">
-                      {svc.microCase.img ? (
-                        <img src={svc.microCase.img} alt="" className="w-full h-24 object-cover rounded-lg border border-white/10" loading="lazy" decoding="async" />
-                      ) : null}
-                      <div>
-                        <ul className="grid grid-cols-3 gap-2 text-sm">
+                  <motion.div initial={{opacity:0,y:8}} whileInView={{opacity:1,y:0}} viewport={{ once:true, amount:0.3 }} transition={{ duration:0.2, delay:0.2 }} className="card p-5 rounded-[14px] md:rounded-[16px]">
+                     <div className="flex items-center gap-2 font-medium text-[18px]"><Sparkles className="w-4 h-4"/> Case & quote</div>
+                    <div className="mt-3 grid sm:grid-cols-[180px,1fr] gap-4 items-start">
+                       {svc.microCase.img ? (
+                         <img src={svc.microCase.img} alt="" className="w-full h-28 object-cover rounded-lg border border-white/10" loading="lazy" decoding="async" />
+                       ) : null}
+                       <div>
+                        <div className="flex flex-wrap gap-2">
                           {svc.microCase.stats.map(s => (
-                            <li key={s} className="sw-chip sw-chip-tertiary justify-center">{s}</li>
+                            <span key={s} className="tag tag--metric text-[11px]"><span className="dot bg-[var(--success)]"></span>{s}</span>
                           ))}
-                        </ul>
-                        {svc.quote ? <div className="mt-2 text-white/80 text-[14px] max-w-[68ch]">{svc.quote}</div> : null}
-                      </div>
-                    </div>
-                  </motion.div>
+                        </div>
+                        {svc.quote ? <div className="mt-3 text-white/75 text-[13px] max-w-[68ch] leading-relaxed">{svc.quote}</div> : null}
+                       </div>
+                     </div>
+                   </motion.div>
                   </div>
                 </div>
                 </div>
@@ -392,11 +381,10 @@ export default function ServicesPage() {
           </Section>
         ))}
 
-  {/* Proof strip immediately visible */}
-  <ProofStrip />
+  
 
   {/* Packages by Audience */}
-        <Section id="packages">
+  <Section id="packages" className="!py-12">
           <Reveal>
             <div className="text-center max-w-2xl mx-auto">
               <Eyebrow>Packages by audience</Eyebrow>
@@ -443,10 +431,10 @@ export default function ServicesPage() {
         <FAQsLite />
 
         {/* Conversion footer */}
-        <Section id="contact">
+    <Section id="contact" className="!py-12">
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <a href="/contact" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full sw-cta font-semibold">Get a Quote <Mail className="w-4 h-4"/></a>
-            <a href="/contact" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/6 text-sw-ink border border-sw-border hover:bg-white/10">Book a 15‑min Consult <Phone className="w-4 h-4"/></a>
+            <a href="/contact" onClick={() => track('final_cta_click' as any, { type: 'quote' })} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full sw-cta font-semibold">Get a Quote <Mail className="w-4 h-4"/></a>
+            <a href="/contact" onClick={() => track('final_cta_click' as any, { type: 'consult' })} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/6 text-sw-ink border border-sw-border hover:bg-white/10">Book a 15‑min Consult <Phone className="w-4 h-4"/></a>
           </div>
           <div className="mt-4 max-w-xl mx-auto grid sm:grid-cols-3 gap-3 text-sm">
             <a href="https://wa.me/" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center">WhatsApp</a>
@@ -518,6 +506,7 @@ function EstimatorSection({ onStart, onSubmit }: { onStart: () => void; onSubmit
 function ProofStrip() {
   const [open, setOpen] = React.useState(false);
   const [vals, setVals] = React.useState([0,0,0]);
+  const kpiRef = React.useRef<HTMLDivElement | null>(null);
   React.useEffect(() => {
     let raf: number; let start: number | null = null;
     const target = [98, 10, 12];
@@ -529,6 +518,17 @@ function ProofStrip() {
     };
     raf = requestAnimationFrame(step); return () => cancelAnimationFrame(raf);
   }, []);
+  React.useEffect(() => {
+    const el = kpiRef.current; if (!el) return;
+    let sent = false;
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (!sent && e.isIntersecting) { sent = true; track('kpi_view' as any); io.disconnect(); }
+      });
+    }, { threshold: 0.5 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
   return (
     <Section id="proof">
       <Reveal>
@@ -536,7 +536,7 @@ function ProofStrip() {
           <Eyebrow>Trusted by chapters & institutions</Eyebrow>
           <motion.div initial="hidden" whileInView="show" viewport={{ once: true, amount: 0.2 }}
             variants={{ show: { transition: { staggerChildren: 0.07, delayChildren: 0.03 } } }}
-            className="mt-3 grid sm:grid-cols-3 gap-4">
+            className="mt-3 grid sm:grid-cols-3 gap-4" ref={kpiRef}>
             {[`${vals[0]}%`,'<10m',`+${vals[2]}%`].map((v, i) => (
               <motion.div key={v} variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.22,1,0.36,1] } } }} className="rounded-2xl border border-white/10 bg-white/5 p-5">
                 <span className="sw-chip-metric text-base font-semibold">{v} <span className="text-sw-mute text-[12px]">{['On‑time starts','Escalation','CSAT'][i]}</span></span>

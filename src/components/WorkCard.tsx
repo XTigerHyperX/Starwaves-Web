@@ -1,5 +1,4 @@
 import React from "react";
-import { GradientRing } from "./common/GradientRing";
 import { useTilt } from "../hooks/useTilt";
 
 export function WorkCard({
@@ -15,11 +14,10 @@ export function WorkCard({
 }) {
   const tiltRef = useTilt();
   return (
-    <div className="relative group h-full" data-test="work-card">
-      <GradientRing />
+  <div className="grad-ring grad-ring--light rounded-2xl h-full group" data-test="work-card">
       <div
         ref={tiltRef}
-        className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 to-white/0 p-6 sm:p-7 md:p-8 backdrop-blur-[2px] hover:from-white/10 transition-all will-change-transform h-full flex flex-col"
+        className="overflow-hidden rounded-[14px] md:rounded-[16px] border border-white/10 bg-gradient-to-br from-white/5 to-white/0 p-6 sm:p-7 md:p-8 backdrop-blur-[2px] hover:from-white/10 transition-all will-change-transform h-full flex flex-col"
       >
         <div className="relative flex h-full flex-col">
           <div className="text-sm text-white/70">{role}</div>

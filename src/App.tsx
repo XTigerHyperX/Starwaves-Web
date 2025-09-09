@@ -26,7 +26,6 @@ import "./styles.css";
 import { NEXT_EVENT, UPCOMING_EVENTS, PARTNER_LOGOS, FAQS, WORKS } from "./content";
 import { ServiceCard } from "./components/ServiceCard";
 import { WorkCard } from "./components/WorkCard";
-import { GradientRing } from "./components/common/GradientRing";
 import { Reveal } from "./components/common/Reveal";
 import { ProcessSection } from "./components/process/ProcessSection";
 import { Testimonials } from "./components/testimonials/Testimonials";
@@ -1280,14 +1279,16 @@ export default function App() {
                   });
                   const timeText = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
                   return (
-                    <div key={`${ev.title}-${ev.dateISO}`} className="relative rounded-2xl border border-white/10 bg-white/5 p-6">
-                      <div className="text-sm text-white/70">{ev.location}</div>
-                      <div className="text-lg sm:text-xl font-semibold mt-1">{ev.title}</div>
-                      <div className="mt-3 flex items-center gap-3 text-white/80">
-                        <span className="inline-flex items-center px-2 py-1 rounded-lg bg-black/30 border border-white/10 text-xs">
-                          {dateText}
-                        </span>
-                        <span className="text-white/60">{timeText}</span>
+                    <div key={`${ev.title}-${ev.dateISO}`} className="grad-ring grad-ring--light rounded-2xl group">
+                      <div className="rounded-[14px] md:rounded-[16px] border border-white/10 bg-white/5 p-6">
+                        <div className="text-sm text-white/70">{ev.location}</div>
+                        <div className="text-lg sm:text-xl font-semibold mt-1">{ev.title}</div>
+                        <div className="mt-3 flex items-center gap-3 text-white/80">
+                          <span className="inline-flex items-center px-2 py-1 rounded-lg bg-black/30 border border-white/10 text-xs">
+                            {dateText}
+                          </span>
+                          <span className="text-white/60">{timeText}</span>
+                        </div>
                       </div>
                     </div>
                   );

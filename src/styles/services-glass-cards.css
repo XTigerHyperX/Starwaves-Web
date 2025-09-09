@@ -1,0 +1,99 @@
+:root {
+  --glass-bg: rgba(16,18,28,.58);
+  --glass-border: rgba(255,255,255,.07);
+  --glass-blur: 10px;
+  --glass-sat: 1.25;
+  --edge-1: #7aa2ff;
+  --edge-2: #b08bff;
+  --edge-3: #ffb784;
+  --aura-1: rgba(122,162,255,.18);
+  --aura-2: rgba(176,139,255,.14);
+  --r: 14px;
+  --stroke: 1px;
+}
+
+/* High-specificity base (no styles here, just raising specificity chain) */
+.services .card,
+.services .service-card,
+.services .section-card,
+.services .panel,
+.services .block,
+.services .box { }
+
+/* Glass skin application (opt-in via .card--glass OR default unless .no-glass) */
+.services .card--glass,
+.services .card.card--glass,
+.services .service-card.card--glass,
+.services .section-card.card--glass,
+.services .panel.card--glass,
+.services .block.card--glass,
+.services .box.card--glass,
+.services .card:not(.no-glass),
+.services .service-card:not(.no-glass),
+.services .section-card:not(.no-glass),
+.services .panel:not(.no-glass),
+.services .block:not(.no-glass),
+.services .box:not(.no-glass) {
+  position: relative;
+  border-radius: var(--r);
+  background: var(--glass-bg);
+  border: var(--stroke) solid var(--glass-border);
+  backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(var(--glass-sat)) blur(var(--glass-blur));
+  box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05);
+  overflow: hidden;
+}
+
+.services .card--glass::before,
+.services .card:not(.no-glass)::before,
+.services .service-card:not(.no-glass)::before,
+.services .section-card:not(.no-glass)::before,
+.services .panel:not(.no-glass)::before,
+.services .block:not(.no-glass)::before,
+.services .box:not(.no-glass)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(90deg, var(--edge-1), var(--edge-2), var(--edge-3));
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: .25;
+  pointer-events: none;
+}
+
+.services .card--glass::after,
+.services .card:not(.no-glass)::after,
+.services .service-card:not(.no-glass)::after,
+.services .section-card:not(.no-glass)::after,
+.services .panel:not(.no-glass)::after,
+.services .block:not(.no-glass)::after,
+.services .box:not(.no-glass)::after {
+  content: "";
+  position: absolute;
+  inset: -1px -1px auto -1px;
+  height: 28%;
+  border-radius: inherit;
+  background: radial-gradient(120% 80% at 50% 0%, rgba(255,255,255,.07) 0%, rgba(255,255,255,0) 60%),
+              radial-gradient(80% 60% at 15% -10%, var(--aura-1) 0%, transparent 60%),
+              radial-gradient(80% 60% at 85% -10%, var(--aura-2) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.services .card--glass h3,
+.services .card h3,
+.services .service-card h3,
+.services .section-card h3 { font-weight: 700; letter-spacing: .02em; }
+
+/* Preserve existing pill/tag look; only slight saturation bump */
+.services .tag,
+.services .chip,
+.services .pill { filter: saturate(1.05); }
+
+.services .card--glass li,
+.services .card li { color: rgba(255,255,255,.86); }
+
+.services .section-title .dot { display:inline-block; width:8px; height:8px; margin-right:10px; border-radius:50%; background: radial-gradient(circle at 30% 30%, #9ab3ff 0%, #6c8bff 55%, transparent 60%); box-shadow:0 0 10px rgba(122,162,255,.6); }
